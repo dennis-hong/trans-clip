@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Allow the app to run outside of sandbox for accessibility features -->
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+
+    <!-- Allow unsigned executable memory for JIT compilation -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!-- Allow network connections for Claude API -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- Allow access to user files for importing/exporting glossary -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+</dict>
+</plist>

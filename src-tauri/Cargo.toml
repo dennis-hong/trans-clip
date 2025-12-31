@@ -1,0 +1,44 @@
+[package]
+name = "trans-clip"
+version = "0.1.0"
+description = "Korean-English translation and clipboard management app"
+authors = ["TransClip"]
+license = "MIT"
+repository = ""
+edition = "2021"
+
+[lib]
+name = "trans_clip_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json"] }
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio"] }
+keyring = "3"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "1"
+log = "0.4"
+env_logger = "0.11"
+
+# macOS specific dependencies
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa = "0.26"
+objc = "0.2"
+core-graphics = "0.24"
+core-foundation = "0.10"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
