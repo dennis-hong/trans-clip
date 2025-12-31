@@ -567,6 +567,31 @@ pub async fn toggle_pin_clipboard_item(
     }
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClearHistoryResponse {
+    pub success: bool,
+    pub deleted_count: i64,
+    pub error: Option<ErrorDetail>,
+}
+
+#[tauri::command]
+pub async fn clear_clipboard_history(
+    state: State<'_, AppState>,
+) -> Result<ClearHistoryResponse, String> {
+    let db = state.db.lock().await;
+    let deleted_count = db
+        .clear_all_clipboard_items()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(ClearHistoryResponse {
+        success: true,
+        deleted_count,
+        error: None,
+    })
+}
+
 #[tauri::command]
 pub async fn set_clipboard(text: String) -> Result<(), String> {
     // Use macOS pasteboard

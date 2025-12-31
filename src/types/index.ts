@@ -154,6 +154,18 @@ export interface DeleteResponse {
 }
 
 /**
+ * Response from clear_clipboard_history command
+ */
+export interface ClearHistoryResponse {
+  success: boolean;
+  deletedCount: number;
+  error?: {
+    code: string;
+    message: string;
+  };
+}
+
+/**
  * 붙여넣기 응답
  */
 export interface PasteResponse {

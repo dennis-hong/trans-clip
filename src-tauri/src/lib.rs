@@ -132,6 +132,7 @@ pub fn run() {
             // Clipboard commands
             commands::get_clipboard_history,
             commands::delete_clipboard_item,
+            commands::clear_clipboard_history,
             commands::toggle_pin_clipboard_item,
             commands::set_clipboard,
             commands::paste_text,

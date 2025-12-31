@@ -114,13 +114,17 @@ impl ClipboardMonitor {
 
             // Get current clipboard change count using AppleScript
             let change_count_output = Command::new("osascript")
+                .env("LANG", "en_US.UTF-8")
+                .env("LC_ALL", "en_US.UTF-8")
                 .arg("-e")
                 .arg("tell application \"System Events\" to return (the clipboard info)")
                 .output()
                 .map_err(|e| format!("Failed to get clipboard info: {}", e))?;
 
-            // Use pbpaste to get clipboard content
+            // Use pbpaste to get clipboard content with explicit UTF-8 encoding
             let content_output = Command::new("pbpaste")
+                .env("LANG", "en_US.UTF-8")
+                .env("LC_ALL", "en_US.UTF-8")
                 .output()
                 .map_err(|e| format!("Failed to get clipboard content: {}", e))?;
 
@@ -128,7 +132,14 @@ impl ClipboardMonitor {
                 return Ok(None); // Clipboard might contain non-text data
             }
 
-            let text = String::from_utf8_lossy(&content_output.stdout).to_string();
+            // Properly handle UTF-8 encoding for Korean and other languages
+            let text = match String::from_utf8(content_output.stdout.clone()) {
+                Ok(s) => s,
+                Err(_) => {
+                    // Fallback: try to decode as UTF-8 with replacement
+                    String::from_utf8_lossy(&content_output.stdout).to_string()
+                }
+            };
             
             // Skip empty content
             if text.trim().is_empty() {
@@ -287,6 +298,8 @@ impl ClipboardMonitor {
             use std::process::Command;
 
             let output = Command::new("osascript")
+                .env("LANG", "en_US.UTF-8")
+                .env("LC_ALL", "en_US.UTF-8")
                 .arg("-e")
                 .arg("tell application \"System Events\" to get name of first application process whose frontmost is true")
                 .output()

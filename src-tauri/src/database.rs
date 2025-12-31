@@ -243,6 +243,15 @@ impl Database {
         Ok(result.rows_affected() > 0)
     }
 
+    /// Delete all clipboard items (clear history)
+    pub async fn clear_all_clipboard_items(&self) -> Result<i64, sqlx::Error> {
+        let result = sqlx::query("DELETE FROM clipboard_items")
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected() as i64)
+    }
+
     pub async fn toggle_pin_clipboard_item(&self, id: &str) -> Result<Option<bool>, sqlx::Error> {
         let row: Option<(i32,)> =
             sqlx::query_as("SELECT is_pinned FROM clipboard_items WHERE id = ?")

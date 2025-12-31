@@ -5,6 +5,7 @@ import type {
   ClipboardHistoryResponse,
   DeleteResponse,
   PinResponse,
+  ClearHistoryResponse,
 } from "@/types";
 
 interface ClipboardStore {
@@ -21,6 +22,7 @@ interface ClipboardStore {
     searchQuery?: string;
   }) => Promise<void>;
   deleteItem: (id: string) => Promise<boolean>;
+  clearAll: () => Promise<boolean>;
   togglePin: (id: string) => Promise<boolean>;
   addItem: (item: ClipboardItem) => void;
   clearError: () => void;
@@ -84,6 +86,29 @@ export const useClipboardStore = create<ClipboardStore>((set) => ({
         return true;
       } else {
         set({ error: response.error?.message ?? "Failed to delete item" });
+        return false;
+      }
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  },
+
+  clearAll: async () => {
+    try {
+      const response = await invoke<ClearHistoryResponse>("clear_clipboard_history");
+
+      if (response.success) {
+        set({
+          items: [],
+          total: 0,
+          hasMore: false,
+        });
+        return true;
+      } else {
+        set({ error: response.error?.message ?? "Failed to clear history" });
         return false;
       }
     } catch (error) {
