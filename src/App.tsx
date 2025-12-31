@@ -17,6 +17,11 @@ function App() {
 
   // Check accessibility permission on mount
   useEffect(() => {
+    // Skip polling if permission is already granted
+    if (hasAccessibility === true) {
+      return;
+    }
+
     const checkPermission = async () => {
       try {
         const result = await invoke<{ granted: boolean }>("check_accessibility_permission");
@@ -29,10 +34,10 @@ function App() {
     
     checkPermission();
     
-    // Re-check periodically in case user grants permission
+    // Re-check periodically only if permission is not yet granted
     const interval = setInterval(checkPermission, 3000);
     return () => clearInterval(interval);
-  }, []);
+  }, [hasAccessibility]);
 
   // Listen for double copy events from backend
   useEffect(() => {
