@@ -152,6 +152,7 @@ pub fn run() {
             // System commands
             commands::check_accessibility_permission,
             commands::request_accessibility_permission,
+            commands::open_accessibility_settings,
             commands::show_translation_popup,
             commands::hide_translation_popup,
         ])

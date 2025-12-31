@@ -1044,6 +1044,19 @@ pub async fn request_accessibility_permission() -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn open_accessibility_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            .spawn()
+            .map_err(|e| format!("Failed to open settings: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn show_translation_popup(
     app: tauri::AppHandle,
     _text: String,
