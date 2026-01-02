@@ -11,7 +11,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, RunEvent,
+    Manager, RunEvent, WindowEvent,
 };
 use tokio::sync::Mutex;
 
@@ -164,6 +164,19 @@ pub fn run() {
                     // Prevent the app from exiting when all windows are closed
                     // This allows it to remain as a menu bar app
                     api.prevent_exit();
+                }
+                RunEvent::WindowEvent {
+                    label,
+                    event: WindowEvent::CloseRequested { api, .. },
+                    ..
+                } => {
+                    // When close button is clicked, hide the window instead of destroying it
+                    if label == "main" {
+                        api.prevent_close();
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let _ = window.hide();
+                        }
+                    }
                 }
                 RunEvent::Reopen { .. } => {
                     // Handle dock icon click - show the main window

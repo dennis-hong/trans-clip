@@ -15,8 +15,8 @@
       {
         "label": "main",
         "title": "TransClip",
-        "width": 440,
-        "height": 600,
+        "width": 900,
+        "height": 500,
         "x": 100,
         "y": 100,
         "visible": true,

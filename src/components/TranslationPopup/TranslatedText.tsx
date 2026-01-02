@@ -15,13 +15,13 @@ export function TranslatedText({
   const languageLabel = language === "ko" ? "Korean" : "English";
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col h-full space-y-2">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
           Translation ({languageLabel})
         </span>
       </div>
-      <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 min-h-[60px]">
+      <div className="flex-1 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 overflow-y-auto min-h-[120px] max-h-[300px]">
         {isLoading ? (
           <div className="flex items-center space-x-2">
             <svg

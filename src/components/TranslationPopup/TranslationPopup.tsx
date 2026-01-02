@@ -93,7 +93,7 @@ export function TranslationPopup({
     <div className="fixed inset-0 flex items-center justify-center p-4 bg-black/20">
       <div
         ref={popupRef}
-        className="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
+        className="w-full max-w-4xl bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
@@ -115,46 +115,52 @@ export function TranslationPopup({
           </button>
         </div>
 
-        {/* Content */}
-        <div className="p-4 space-y-4">
-          <SourceText text={sourceText} language={detectedLanguage} />
+        {/* Content - Side by Side Layout */}
+        <div className="p-4">
+          <div className="flex gap-4 items-stretch">
+            {/* Source Text */}
+            <div className="flex-1 min-w-0">
+              <SourceText text={sourceText} language={detectedLanguage} />
+            </div>
 
-          <div className="flex justify-center">
-            <svg
-              className="w-5 h-5 text-gray-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 14l-7 7m0 0l-7-7m7 7V3"
+            {/* Arrow Separator */}
+            <div className="flex items-center justify-center px-2">
+              <svg
+                className="w-5 h-5 text-gray-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M14 5l7 7m0 0l-7 7m7-7H3"
+                />
+              </svg>
+            </div>
+
+            {/* Translated Text */}
+            <div className="flex-1 min-w-0">
+              <TranslatedText
+                text={result?.translatedText ?? ""}
+                language={targetLanguage}
+                isLoading={isLoading}
+                error={error ?? undefined}
               />
-            </svg>
+            </div>
           </div>
 
-          <TranslatedText
-            text={result?.translatedText ?? ""}
-            language={targetLanguage}
-            isLoading={isLoading}
-            error={error ?? undefined}
-          />
+          {/* Footer info */}
+          <div className="flex items-center gap-4 mt-3 text-xs text-gray-500 dark:text-gray-400">
+            {/* Glossary info */}
+            {result?.glossaryApplied && result.glossaryApplied.length > 0 && (
+              <span>{result.glossaryApplied.length} glossary term(s) applied</span>
+            )}
 
-          {/* Glossary info */}
-          {result?.glossaryApplied && result.glossaryApplied.length > 0 && (
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              {result.glossaryApplied.length} glossary term(s) applied
-            </p>
-          )}
-
-          {/* Cache indicator */}
-          {result?.fromCache && (
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              From cache
-            </p>
-          )}
+            {/* Cache indicator */}
+            {result?.fromCache && <span>From cache</span>}
+          </div>
         </div>
 
         {/* Actions */}
