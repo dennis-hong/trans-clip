@@ -2,18 +2,24 @@ import { useState, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { TranslationPopup } from "@/components/TranslationPopup";
+import { PolishPopup } from "@/components/PolishPopup";
 import { SettingsPanel } from "@/components/Settings/SettingsPanel";
 import { HistoryPanel } from "@/components/ClipboardHistory/HistoryPanel";
 import { GlossaryList } from "@/components/GlossaryManager/GlossaryList";
-import type { DoubleCopyPayload } from "@/types";
+import type { DoubleCopyPayload, PolishPayload } from "@/types";
 
 type Tab = "translate" | "history" | "glossary" | "settings";
+type PopupMode = "none" | "translate" | "polish";
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>("translate");
   const [sourceText, setSourceText] = useState<string | null>(null);
-  const [isTranslating, setIsTranslating] = useState(false);
+  const [popupMode, setPopupMode] = useState<PopupMode>("none");
   const [hasAccessibility, setHasAccessibility] = useState<boolean | null>(null);
+
+  // Legacy state for compatibility
+  const isTranslating = popupMode === "translate";
+  const isPolishing = popupMode === "polish";
 
   // Check accessibility permission on mount
   useEffect(() => {
@@ -39,7 +45,7 @@ function App() {
     return () => clearInterval(interval);
   }, [hasAccessibility]);
 
-  // Listen for double copy events from backend
+  // Listen for double copy events from backend (Cmd+CC for translation)
   useEffect(() => {
     const unlisten = listen<DoubleCopyPayload>(
       "double_copy_detected",
@@ -47,7 +53,26 @@ function App() {
         const { text } = event.payload;
         if (text && text.trim()) {
           setSourceText(text);
-          setIsTranslating(true);
+          setPopupMode("translate");
+          setActiveTab("translate");
+        }
+      }
+    );
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // Listen for polish events from backend (Cmd+Shift+CC for polishing)
+  useEffect(() => {
+    const unlisten = listen<PolishPayload>(
+      "polish_detected",
+      (event) => {
+        const { text } = event.payload;
+        if (text && text.trim()) {
+          setSourceText(text);
+          setPopupMode("polish");
           setActiveTab("translate");
         }
       }
@@ -59,18 +84,30 @@ function App() {
   }, []);
 
   const handleClosePopup = useCallback(async () => {
-    setIsTranslating(false);
+    setPopupMode("none");
     setSourceText(null);
   }, []);
 
   // Manual translate trigger for testing
   const handleManualTranslate = async () => {
     try {
-      // Get clipboard text
       const text = await navigator.clipboard.readText();
       if (text && text.trim()) {
         setSourceText(text);
-        setIsTranslating(true);
+        setPopupMode("translate");
+      }
+    } catch (err) {
+      console.error("Failed to read clipboard:", err);
+    }
+  };
+
+  // Manual polish trigger for testing
+  const handleManualPolish = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text && text.trim()) {
+        setSourceText(text);
+        setPopupMode("polish");
       }
     } catch (err) {
       console.error("Failed to read clipboard:", err);
@@ -110,6 +147,8 @@ function App() {
           <div className="h-full flex flex-col">
             {isTranslating && sourceText ? (
               <TranslationPopup sourceText={sourceText} onClose={handleClosePopup} />
+            ) : isPolishing && sourceText ? (
+              <PolishPopup sourceText={sourceText} onClose={handleClosePopup} />
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center p-4">
                 <div className="text-center space-y-4">
@@ -135,7 +174,7 @@ function App() {
                             Accessibility Permission Required
                           </p>
                           <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                            Required for <span className="font-mono font-medium">Cmd+C+C</span> detection.
+                            Required for hotkey detection.
                           </p>
                           <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
                             Grant permission in:<br />
@@ -152,15 +191,35 @@ function App() {
                     </div>
                   )}
 
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    <span className="font-medium text-gray-700 dark:text-gray-300">Cmd+C+C</span> to translate clipboard
-                  </p>
-                  <button
-                    onClick={handleManualTranslate}
-                    className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors"
-                  >
-                    Translate Now
-                  </button>
+                  {/* Hotkey Instructions */}
+                  <div className="space-y-2">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      <span className="font-mono font-medium text-gray-700 dark:text-gray-300">Cmd+C+C</span>
+                      <span className="mx-2">→</span>
+                      <span>번역</span>
+                    </p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      <span className="font-mono font-medium text-gray-700 dark:text-gray-300">Cmd+Shift+C+C</span>
+                      <span className="mx-2">→</span>
+                      <span>글 다듬기</span>
+                    </p>
+                  </div>
+
+                  {/* Manual Buttons */}
+                  <div className="flex gap-2 justify-center">
+                    <button
+                      onClick={handleManualTranslate}
+                      className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors"
+                    >
+                      🌐 번역하기
+                    </button>
+                    <button
+                      onClick={handleManualPolish}
+                      className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg text-sm font-medium transition-colors"
+                    >
+                      ✏️ 글 다듬기
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

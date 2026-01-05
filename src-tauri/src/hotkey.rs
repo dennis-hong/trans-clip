@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition};
 
 static LAST_CMD_C_TIME: AtomicU64 = AtomicU64::new(0);
+static LAST_CMD_SHIFT_C_TIME: AtomicU64 = AtomicU64::new(0);
 static HOTKEY_ENABLED: AtomicBool = AtomicBool::new(false);
 static DOUBLE_PRESS_INTERVAL_MS: AtomicU64 = AtomicU64::new(500);
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
@@ -141,6 +142,12 @@ pub struct DoubleCopyPayload {
     pub timestamp: String,
 }
 
+#[derive(Clone, serde::Serialize)]
+pub struct PolishPayload {
+    pub text: String,
+    pub timestamp: String,
+}
+
 // ============================================
 // macOS Implementation using CGEventTap (raw FFI)
 // ============================================
@@ -158,6 +165,7 @@ mod macos {
 
     // CGEventFlags
     const K_CG_EVENT_FLAG_MASK_COMMAND: u64 = 0x00100000;
+    const K_CG_EVENT_FLAG_MASK_SHIFT: u64 = 0x00020000;
 
     // CGEventTap types
     type CGEventRef = *mut c_void;
@@ -241,8 +249,9 @@ mod macos {
             let keycode = CGEventGetIntegerValueField(event, K_CG_KEYBOARD_EVENT_KEYCODE);
             let flags = CGEventGetFlags(event);
 
-            // Check if it's Cmd+C
+            // Check if it's Cmd+C (with or without Shift)
             let is_cmd_pressed = (flags & K_CG_EVENT_FLAG_MASK_COMMAND) != 0;
+            let is_shift_pressed = (flags & K_CG_EVENT_FLAG_MASK_SHIFT) != 0;
             let is_c_key = keycode == KEY_C;
 
             if is_cmd_pressed && is_c_key {
@@ -251,21 +260,46 @@ mod macos {
                     .unwrap()
                     .as_millis() as u64;
 
-                let last_time = LAST_CMD_C_TIME.swap(now, Ordering::SeqCst);
                 let interval = DOUBLE_PRESS_INTERVAL_MS.load(Ordering::SeqCst);
 
-                // Check if this is a double-press
-                if last_time > 0 && (now - last_time) < interval {
-                    log::info!("Double Cmd+C detected! Interval: {}ms", now - last_time);
-
-                    // Reset the timer to prevent triple-press triggers
+                if is_shift_pressed {
+                    // Cmd+Shift+C detected - check for double-press for Polish
+                    let last_time = LAST_CMD_SHIFT_C_TIME.swap(now, Ordering::SeqCst);
+                    
+                    // Reset the other timer to prevent cross-triggering
                     LAST_CMD_C_TIME.store(0, Ordering::SeqCst);
 
-                    // Small delay to let the clipboard update from the copy action
-                    thread::spawn(|| {
-                        thread::sleep(std::time::Duration::from_millis(100));
-                        trigger_translation();
-                    });
+                    if last_time > 0 && (now - last_time) < interval {
+                        log::info!("Double Cmd+Shift+C detected! Interval: {}ms", now - last_time);
+
+                        // Reset the timer to prevent triple-press triggers
+                        LAST_CMD_SHIFT_C_TIME.store(0, Ordering::SeqCst);
+
+                        // Small delay to let the clipboard update
+                        thread::spawn(|| {
+                            thread::sleep(std::time::Duration::from_millis(100));
+                            trigger_polish();
+                        });
+                    }
+                } else {
+                    // Cmd+C detected (without Shift) - check for double-press for Translation
+                    let last_time = LAST_CMD_C_TIME.swap(now, Ordering::SeqCst);
+                    
+                    // Reset the other timer to prevent cross-triggering
+                    LAST_CMD_SHIFT_C_TIME.store(0, Ordering::SeqCst);
+
+                    if last_time > 0 && (now - last_time) < interval {
+                        log::info!("Double Cmd+C detected! Interval: {}ms", now - last_time);
+
+                        // Reset the timer to prevent triple-press triggers
+                        LAST_CMD_C_TIME.store(0, Ordering::SeqCst);
+
+                        // Small delay to let the clipboard update from the copy action
+                        thread::spawn(|| {
+                            thread::sleep(std::time::Duration::from_millis(100));
+                            trigger_translation();
+                        });
+                    }
                 }
             }
         }
@@ -337,6 +371,37 @@ mod macos {
                 }
                 Ok(_) => {
                     log::info!("Clipboard is empty, skipping translation");
+                }
+                Err(e) => {
+                    log::error!("Failed to get clipboard text: {}", e);
+                }
+            }
+        }
+    }
+
+    fn trigger_polish() {
+        if let Some(app_handle) = APP_HANDLE.get() {
+            // Get clipboard text
+            match get_clipboard_text() {
+                Ok(text) if !text.trim().is_empty() => {
+                    let payload = PolishPayload {
+                        text,
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                    };
+
+                    if let Err(e) = app_handle.emit("polish_detected", payload) {
+                        log::error!("Failed to emit polish_detected event: {}", e);
+                    } else {
+                        log::info!("Emitted polish_detected event");
+
+                        // Show and focus the window at the configured position
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            show_window_at_position(&window);
+                        }
+                    }
+                }
+                Ok(_) => {
+                    log::info!("Clipboard is empty, skipping polish");
                 }
                 Err(e) => {
                     log::error!("Failed to get clipboard text: {}", e);

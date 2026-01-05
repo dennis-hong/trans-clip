@@ -73,6 +73,71 @@ export type ClaudeModel = "claude-haiku-4-5-20251001" | "claude-sonnet-4-5-20250
 export type PopupPosition = "cursor" | "center" | "top-right";
 
 // ============================================
+// Polish (Text Refinement) Types
+// ============================================
+
+/**
+ * 다듬기 상황 (Context) - 글을 쓰는 목적과 대상
+ */
+export type PolishContext = 
+  | "report-to-superior"   // 상사에게 보고
+  | "team-announcement"    // 팀 공지
+  | "peer-discussion"      // 동료와 논의
+  | "external-formal"      // 외부 커뮤니케이션
+  | "documentation";       // 문서 작성
+
+/**
+ * 다듬기 채널 (Channel) - 글을 작성하는 플랫폼/매체
+ */
+export type PolishChannel = 
+  | "slack-message"        // 슬랙 메시지
+  | "slack-thread"         // 슬랙 스레드
+  | "confluence-wiki"      // 컨플루언스 위키
+  | "jira-comment"         // Jira 코멘트
+  | "jira-description"     // Jira 설명
+  | "email"                // 이메일
+  | "pr-description"       // PR 설명
+  | "code-review";         // 코드 리뷰
+
+/**
+ * 다듬기 추가 옵션
+ */
+export type PolishOption = 
+  | "shorter"              // 더 짧게
+  | "longer"               // 더 자세하게
+  | "bullet"               // 불릿으로 정리
+  | "formal"               // 더 격식있게
+  | "casual"               // 더 캐주얼하게
+  | "action-clear";        // 액션 명확히
+
+/**
+ * 상황 정보
+ */
+export interface PolishContextInfo {
+  id: PolishContext;
+  name: string;
+  description: string;
+}
+
+/**
+ * 채널 정보
+ */
+export interface PolishChannelInfo {
+  id: PolishChannel;
+  name: string;
+  description: string;
+}
+
+/**
+ * 옵션 정보
+ */
+export interface PolishOptionInfo {
+  id: PolishOption;
+  name: string;
+  description: string;
+}
+
+// ============================================
 // API Response Types (from contracts/)
 // ============================================
 
@@ -95,6 +160,20 @@ export interface TranslateResponse {
 export interface TranslateError {
   code: "EMPTY_TEXT" | "TEXT_TOO_LONG" | "API_ERROR" | "NETWORK_ERROR" | "INVALID_API_KEY";
   message: string;
+}
+
+/**
+ * 다듬기 응답
+ */
+export interface PolishResponse {
+  success: boolean;
+  polishedText?: string;
+  detectedLanguage?: Language;
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+  };
+  error?: TranslateError;
 }
 
 /**
@@ -220,9 +299,17 @@ export interface ClipboardChangedPayload {
 }
 
 /**
- * 더블 복사 감지 이벤트 페이로드
+ * 더블 복사 감지 이벤트 페이로드 (번역용)
  */
 export interface DoubleCopyPayload {
+  text: string;
+  timestamp: string;
+}
+
+/**
+ * 다듬기 감지 이벤트 페이로드
+ */
+export interface PolishPayload {
   text: string;
   timestamp: string;
 }

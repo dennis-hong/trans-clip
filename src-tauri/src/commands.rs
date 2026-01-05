@@ -485,6 +485,228 @@ fn detect_language(text: &str) -> String {
 }
 
 // ============================================
+// Polish (Text Refinement) Commands
+// ============================================
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PolishResponse {
+    pub success: bool,
+    pub polished_text: Option<String>,
+    pub detected_language: Option<String>,
+    pub token_usage: Option<TokenUsage>,
+    pub error: Option<TranslateError>,
+}
+
+#[tauri::command]
+pub async fn polish(
+    state: State<'_, AppState>,
+    text: String,
+    context: String,
+    channel: String,
+    options: Vec<String>,
+) -> Result<PolishResponse, String> {
+    // Validation
+    if text.is_empty() {
+        return Ok(PolishResponse {
+            success: false,
+            polished_text: None,
+            detected_language: None,
+            token_usage: None,
+            error: Some(TranslateError {
+                code: "EMPTY_TEXT".to_string(),
+                message: "Text cannot be empty".to_string(),
+            }),
+        });
+    }
+
+    if text.len() > 10000 {
+        return Ok(PolishResponse {
+            success: false,
+            polished_text: None,
+            detected_language: None,
+            token_usage: None,
+            error: Some(TranslateError {
+                code: "TEXT_TOO_LONG".to_string(),
+                message: "Text exceeds maximum length of 10000 characters".to_string(),
+            }),
+        });
+    }
+
+    let db = state.db.lock().await;
+    let settings = db.get_settings().await.map_err(|e| e.to_string())?;
+
+    // Get API key
+    let api_key = match &settings.api_key {
+        Some(key) if !key.is_empty() => key.clone(),
+        _ => {
+            return Ok(PolishResponse {
+                success: false,
+                polished_text: None,
+                detected_language: None,
+                token_usage: None,
+                error: Some(TranslateError {
+                    code: "INVALID_API_KEY".to_string(),
+                    message: "API key not configured. Please set your Claude API key in Settings.".to_string(),
+                }),
+            });
+        }
+    };
+
+    // Detect language
+    let detected_lang = detect_language(&text);
+
+    // Build context description
+    let context_desc = match context.as_str() {
+        "report-to-superior" => "상사나 임원에게 보고하는 상황입니다. 존댓말을 사용하고, 핵심을 먼저 말하며, 결론-근거 순서로 명확하게 작성해주세요.",
+        "team-announcement" => "팀원들에게 전달하는 공지 상황입니다. 친근하면서도 명확하게, 불릿포인트로 정리하고 행동 요청을 명시해주세요.",
+        "peer-discussion" => "동료와 논의하는 상황입니다. 편하게 작성하되 논의 포인트를 정리하고 질문을 명확히 해주세요.",
+        "external-formal" => "파트너사나 고객사 등 외부와 소통하는 상황입니다. 격식체로 정중하게, 배경-목적-요청 구조로 작성해주세요.",
+        "documentation" => "기술 문서나 가이드를 작성하는 상황입니다. 객관적이고 3인칭으로, 단계별로 명료하게 설명해주세요.",
+        _ => "일반적인 업무 커뮤니케이션 상황입니다.",
+    };
+
+    // Build channel description
+    let channel_desc = match channel.as_str() {
+        "slack-message" => "슬랙 메시지입니다. 짧고 간결하게, 한눈에 파악할 수 있게 작성해주세요. 적절한 이모지 사용 가능합니다.",
+        "slack-thread" => "슬랙 스레드 답글입니다. 컨텍스트를 유지하면서 약간 더 상세하게 작성해주세요.",
+        "confluence-wiki" => "컨플루언스 위키 문서입니다. 헤딩과 불릿으로 구조화하고, 완전한 문장으로 작성해주세요.",
+        "jira-comment" => "Jira 이슈 코멘트입니다. 간결하게, 결론과 액션 중심으로 작성해주세요.",
+        "jira-description" => "Jira 이슈 설명입니다. 배경-목표-상세-AC(수락 기준) 구조로 작성해주세요.",
+        "email" => "업무 이메일입니다. 인사-본문-마무리 구조로, 요청사항을 명확히 해주세요.",
+        "pr-description" => "GitHub/GitLab PR 설명입니다. What-Why-How 구조로 변경사항을 요약해주세요.",
+        "code-review" => "코드 리뷰 코멘트입니다. 건설적으로, 구체적인 제안을 포함해주세요.",
+        _ => "일반적인 텍스트 형식입니다.",
+    };
+
+    // Build options description
+    let mut options_desc = String::new();
+    for opt in &options {
+        let opt_text = match opt.as_str() {
+            "shorter" => "더 짧게: 핵심만 남기고 불필요한 부분을 제거해주세요.",
+            "longer" => "더 자세하게: 부연 설명과 맥락을 추가해주세요.",
+            "bullet" => "불릿으로 정리: 나열된 내용을 불릿포인트로 구조화해주세요.",
+            "formal" => "더 격식있게: 톤을 높여 공식적으로 작성해주세요.",
+            "casual" => "더 캐주얼하게: 톤을 낮춰 편하게 작성해주세요.",
+            "action-clear" => "액션 명확히: 요청사항이나 다음 단계를 명확하게 표현해주세요.",
+            _ => "",
+        };
+        if !opt_text.is_empty() {
+            options_desc.push_str("\n- ");
+            options_desc.push_str(opt_text);
+        }
+    }
+
+    let lang_instruction = if detected_lang == "ko" {
+        "한국어로 다듬어주세요."
+    } else {
+        "Refine in English."
+    };
+
+    let prompt = format!(
+        r#"당신은 전문 에디터입니다. 사용자가 빠르게 작성한 러프한 초안을 깔끔하고 명료하게 정돈해주세요.
+
+**중요**: 내용을 바꾸거나 새로운 정보를 추가하지 말고, 원본의 의미를 유지하면서 전달력이 좋게 다듬어주세요.
+
+## 상황
+{context_desc}
+
+## 채널/매체
+{channel_desc}
+{options_section}
+## 원문
+{text}
+
+## 지시사항
+{lang_instruction}
+다듬어진 결과만 출력하세요. 설명이나 추가 코멘트는 포함하지 마세요."#,
+        context_desc = context_desc,
+        channel_desc = channel_desc,
+        options_section = if options_desc.is_empty() { String::new() } else { format!("\n## 추가 요청사항{}", options_desc) },
+        text = text,
+        lang_instruction = lang_instruction,
+    );
+
+    // Call Claude API
+    let client = reqwest::Client::new();
+    let response = client
+        .post("https://api.anthropic.com/v1/messages")
+        .header("x-api-key", &api_key)
+        .header("anthropic-version", "2023-06-01")
+        .header("content-type", "application/json")
+        .json(&serde_json::json!({
+            "model": settings.preferred_model,
+            "max_tokens": 4096,
+            "messages": [{"role": "user", "content": prompt}]
+        }))
+        .send()
+        .await;
+
+    match response {
+        Ok(res) => {
+            if res.status().is_success() {
+                let body: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+
+                let polished_text = body["content"][0]["text"]
+                    .as_str()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+
+                let input_tokens = body["usage"]["input_tokens"].as_i64().map(|v| v as i32);
+                let output_tokens = body["usage"]["output_tokens"].as_i64().map(|v| v as i32);
+
+                Ok(PolishResponse {
+                    success: true,
+                    polished_text: Some(polished_text),
+                    detected_language: Some(detected_lang),
+                    token_usage: match (input_tokens, output_tokens) {
+                        (Some(i), Some(o)) => Some(TokenUsage {
+                            input_tokens: i,
+                            output_tokens: o,
+                        }),
+                        _ => None,
+                    },
+                    error: None,
+                })
+            } else if res.status().as_u16() == 401 {
+                Ok(PolishResponse {
+                    success: false,
+                    polished_text: None,
+                    detected_language: None,
+                    token_usage: None,
+                    error: Some(TranslateError {
+                        code: "INVALID_API_KEY".to_string(),
+                        message: "Invalid API key".to_string(),
+                    }),
+                })
+            } else {
+                Ok(PolishResponse {
+                    success: false,
+                    polished_text: None,
+                    detected_language: None,
+                    token_usage: None,
+                    error: Some(TranslateError {
+                        code: "API_ERROR".to_string(),
+                        message: format!("API error: {}", res.status()),
+                    }),
+                })
+            }
+        }
+        Err(e) => Ok(PolishResponse {
+            success: false,
+            polished_text: None,
+            detected_language: None,
+            token_usage: None,
+            error: Some(TranslateError {
+                code: "NETWORK_ERROR".to_string(),
+                message: format!("Network error: {}", e),
+            }),
+        }),
+    }
+}
+
+// ============================================
 // Clipboard Commands
 // ============================================
 
