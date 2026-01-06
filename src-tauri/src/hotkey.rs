@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition};
 
 static LAST_CMD_C_TIME: AtomicU64 = AtomicU64::new(0);
-static LAST_CMD_SHIFT_C_TIME: AtomicU64 = AtomicU64::new(0);
+static LAST_CMD_D_TIME: AtomicU64 = AtomicU64::new(0);
 static HOTKEY_ENABLED: AtomicBool = AtomicBool::new(false);
 static DOUBLE_PRESS_INTERVAL_MS: AtomicU64 = AtomicU64::new(500);
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
@@ -160,12 +160,12 @@ mod macos {
     use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    // Key code for 'C' on macOS
+    // Key codes on macOS
     const KEY_C: i64 = 8;
+    const KEY_D: i64 = 2;
 
     // CGEventFlags
     const K_CG_EVENT_FLAG_MASK_COMMAND: u64 = 0x00100000;
-    const K_CG_EVENT_FLAG_MASK_SHIFT: u64 = 0x00020000;
 
     // CGEventTap types
     type CGEventRef = *mut c_void;
@@ -249,57 +249,56 @@ mod macos {
             let keycode = CGEventGetIntegerValueField(event, K_CG_KEYBOARD_EVENT_KEYCODE);
             let flags = CGEventGetFlags(event);
 
-            // Check if it's Cmd+C (with or without Shift)
             let is_cmd_pressed = (flags & K_CG_EVENT_FLAG_MASK_COMMAND) != 0;
-            let is_shift_pressed = (flags & K_CG_EVENT_FLAG_MASK_SHIFT) != 0;
             let is_c_key = keycode == KEY_C;
+            let is_d_key = keycode == KEY_D;
 
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64;
+
+            let interval = DOUBLE_PRESS_INTERVAL_MS.load(Ordering::SeqCst);
+
+            // Cmd+C detected - check for double-press for Translation
             if is_cmd_pressed && is_c_key {
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as u64;
+                let last_time = LAST_CMD_C_TIME.swap(now, Ordering::SeqCst);
+                
+                // Reset D timer to prevent cross-triggering
+                LAST_CMD_D_TIME.store(0, Ordering::SeqCst);
 
-                let interval = DOUBLE_PRESS_INTERVAL_MS.load(Ordering::SeqCst);
+                if last_time > 0 && (now - last_time) < interval {
+                    log::info!("Double Cmd+C detected! Interval: {}ms", now - last_time);
 
-                if is_shift_pressed {
-                    // Cmd+Shift+C detected - check for double-press for Polish
-                    let last_time = LAST_CMD_SHIFT_C_TIME.swap(now, Ordering::SeqCst);
-                    
-                    // Reset the other timer to prevent cross-triggering
+                    // Reset the timer to prevent triple-press triggers
                     LAST_CMD_C_TIME.store(0, Ordering::SeqCst);
 
-                    if last_time > 0 && (now - last_time) < interval {
-                        log::info!("Double Cmd+Shift+C detected! Interval: {}ms", now - last_time);
+                    // Small delay to let the clipboard update from the copy action
+                    thread::spawn(|| {
+                        thread::sleep(std::time::Duration::from_millis(100));
+                        trigger_translation();
+                    });
+                }
+            }
 
-                        // Reset the timer to prevent triple-press triggers
-                        LAST_CMD_SHIFT_C_TIME.store(0, Ordering::SeqCst);
+            // Cmd+D detected - check for double-press for Polish
+            if is_cmd_pressed && is_d_key {
+                let last_time = LAST_CMD_D_TIME.swap(now, Ordering::SeqCst);
+                
+                // Reset C timer to prevent cross-triggering
+                LAST_CMD_C_TIME.store(0, Ordering::SeqCst);
 
-                        // Small delay to let the clipboard update
-                        thread::spawn(|| {
-                            thread::sleep(std::time::Duration::from_millis(100));
-                            trigger_polish();
-                        });
-                    }
-                } else {
-                    // Cmd+C detected (without Shift) - check for double-press for Translation
-                    let last_time = LAST_CMD_C_TIME.swap(now, Ordering::SeqCst);
-                    
-                    // Reset the other timer to prevent cross-triggering
-                    LAST_CMD_SHIFT_C_TIME.store(0, Ordering::SeqCst);
+                if last_time > 0 && (now - last_time) < interval {
+                    log::info!("Double Cmd+D detected! Interval: {}ms", now - last_time);
 
-                    if last_time > 0 && (now - last_time) < interval {
-                        log::info!("Double Cmd+C detected! Interval: {}ms", now - last_time);
+                    // Reset the timer to prevent triple-press triggers
+                    LAST_CMD_D_TIME.store(0, Ordering::SeqCst);
 
-                        // Reset the timer to prevent triple-press triggers
-                        LAST_CMD_C_TIME.store(0, Ordering::SeqCst);
-
-                        // Small delay to let the clipboard update from the copy action
-                        thread::spawn(|| {
-                            thread::sleep(std::time::Duration::from_millis(100));
-                            trigger_translation();
-                        });
-                    }
+                    // Small delay then trigger polish
+                    thread::spawn(|| {
+                        thread::sleep(std::time::Duration::from_millis(100));
+                        trigger_polish();
+                    });
                 }
             }
         }
@@ -381,6 +380,17 @@ mod macos {
 
     fn trigger_polish() {
         if let Some(app_handle) = APP_HANDLE.get() {
+            // First, simulate Cmd+C to copy the selected text
+            // since Cmd+D doesn't copy anything
+            log::info!("trigger_polish: Simulating Cmd+C to copy selected text");
+            if let Err(e) = simulate_copy() {
+                log::error!("Failed to simulate copy: {}", e);
+                return;
+            }
+            
+            // Wait for clipboard to update (need more time for AppleScript + clipboard sync)
+            thread::sleep(std::time::Duration::from_millis(200));
+            
             // Get clipboard text
             match get_clipboard_text() {
                 Ok(text) if !text.trim().is_empty() => {
@@ -407,6 +417,32 @@ mod macos {
                     log::error!("Failed to get clipboard text: {}", e);
                 }
             }
+        }
+    }
+    
+    /// Simulate Cmd+C to copy selected text to clipboard
+    fn simulate_copy() -> Result<(), String> {
+        use std::process::Command;
+        
+        // Use key code 8 (c key) with command down - more reliable than keystroke
+        let script = r#"
+            tell application "System Events"
+                key code 8 using command down
+            end tell
+        "#;
+        
+        let output = Command::new("osascript")
+            .arg("-e")
+            .arg(script)
+            .output()
+            .map_err(|e| format!("Failed to execute osascript: {}", e))?;
+        
+        if output.status.success() {
+            log::info!("Simulated Cmd+C (key code 8) successfully");
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(format!("osascript failed: {}", stderr))
         }
     }
 

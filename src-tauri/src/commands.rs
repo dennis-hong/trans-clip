@@ -875,22 +875,27 @@ pub async fn paste_text(
     // Longer delay to ensure clipboard is ready
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-    // Then simulate Cmd+Tab to switch back to previous app, then Cmd+V
+    // Then switch back to previous app and paste
     #[cfg(target_os = "macos")]
     {
         use std::process::Command;
 
-        log::info!("paste_text: Executing AppleScript for Cmd+Tab then Cmd+V");
+        log::info!("paste_text: Executing AppleScript to activate previous app and paste");
         
-        // Use AppleScript to switch to previous app and paste
-        // The delay is configurable via settings
+        // Use AppleScript to:
+        // 1. Use Cmd+Tab to switch to previous app
+        // 2. Wait for the app to be activated
+        // 3. Paste using key code (more reliable than keystroke)
         let script = format!(r#"
             tell application "System Events"
                 -- Switch to previous app using Cmd+Tab
-                keystroke tab using command down
+                key code 48 using command down
+                
+                -- Wait for app switch to complete
                 delay {:.3}
-                -- Now paste
-                keystroke "v" using command down
+                
+                -- Send Cmd+V using key code 9 (v key) - more reliable than keystroke
+                key code 9 using command down
             end tell
         "#, delay_seconds);
         

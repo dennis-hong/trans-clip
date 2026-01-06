@@ -199,7 +199,7 @@ function App() {
                       <span>번역</span>
                     </p>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
-                      <span className="font-mono font-medium text-gray-700 dark:text-gray-300">Cmd+Shift+C+C</span>
+                      <span className="font-mono font-medium text-gray-700 dark:text-gray-300">Cmd+D+D</span>
                       <span className="mx-2">→</span>
                       <span>글 다듬기</span>
                     </p>
