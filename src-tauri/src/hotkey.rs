@@ -1,139 +1,29 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::OnceLock;
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition};
+use tauri::{AppHandle, Emitter, Manager};
 
 static LAST_CMD_C_TIME: AtomicU64 = AtomicU64::new(0);
 static LAST_CMD_D_TIME: AtomicU64 = AtomicU64::new(0);
 static HOTKEY_ENABLED: AtomicBool = AtomicBool::new(false);
 static DOUBLE_PRESS_INTERVAL_MS: AtomicU64 = AtomicU64::new(500);
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
-// Popup position: 0 = cursor, 1 = center, 2 = top-right
-static POPUP_POSITION: AtomicU8 = AtomicU8::new(0);
 
 const DEFAULT_DOUBLE_PRESS_INTERVAL_MS: u64 = 500;
 
-/// Set the popup position from settings
-pub fn set_popup_position(position: &str) {
-    let value = match position {
-        "cursor" => 0,
-        "center" => 1,
-        "top-right" => 2,
-        _ => 0,
-    };
-    POPUP_POSITION.store(value, Ordering::SeqCst);
-    log::info!("Popup position set to: {} ({})", position, value);
+/// Set the popup position from settings (deprecated - position is now always bottom center)
+pub fn set_popup_position(_position: &str) {
+    // No-op: popup position is now always bottom center, managed by set_drawer_mode
+    log::info!("set_popup_position called but ignored - position is always bottom center");
 }
 
-/// Get current popup position
-fn get_popup_position() -> u8 {
-    POPUP_POSITION.load(Ordering::SeqCst)
-}
-
-/// Get mouse cursor position (macOS only)
-#[cfg(target_os = "macos")]
-fn get_mouse_position() -> Option<(f64, f64)> {
-    use std::ffi::c_void;
-    
-    #[link(name = "CoreGraphics", kind = "framework")]
-    extern "C" {
-        fn CGEventCreate(source: *const c_void) -> *mut c_void;
-        fn CGEventGetLocation(event: *const c_void) -> CGPoint;
-        fn CFRelease(cf: *mut c_void);
-    }
-    
-    #[repr(C)]
-    struct CGPoint {
-        x: f64,
-        y: f64,
-    }
-    
-    unsafe {
-        let event = CGEventCreate(std::ptr::null());
-        if event.is_null() {
-            return None;
-        }
-        let point = CGEventGetLocation(event);
-        CFRelease(event);
-        Some((point.x, point.y))
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn get_mouse_position() -> Option<(f64, f64)> {
-    None
-}
-
-/// Position and show the window based on the current popup position setting
+/// Show the window and set focus without changing position
+/// The window position is managed by set_drawer_mode which keeps it at bottom center
 pub fn show_window_at_position(window: &tauri::WebviewWindow) {
-    let position_type = get_popup_position();
-    
-    // Get window size
-    let window_size = window.outer_size().unwrap_or(tauri::PhysicalSize { width: 400, height: 500 });
-    
-    // Get monitor info
-    let monitor = window.current_monitor().ok().flatten();
-    let (screen_width, screen_height, screen_x, screen_y) = if let Some(m) = monitor {
-        let size = m.size();
-        let pos = m.position();
-        (size.width as f64, size.height as f64, pos.x as f64, pos.y as f64)
-    } else {
-        (1920.0, 1080.0, 0.0, 0.0)
-    };
-    
-    let (x, y) = match position_type {
-        0 => {
-            // Cursor position
-            if let Some((mx, my)) = get_mouse_position() {
-                // Offset slightly from cursor
-                let offset_x = 20.0;
-                let offset_y = 20.0;
-                
-                // Ensure window stays within screen bounds
-                let mut x = mx + offset_x;
-                let mut y = my + offset_y;
-                
-                if x + window_size.width as f64 > screen_x + screen_width {
-                    x = mx - window_size.width as f64 - offset_x;
-                }
-                if y + window_size.height as f64 > screen_y + screen_height {
-                    y = my - window_size.height as f64 - offset_y;
-                }
-                
-                (x as i32, y as i32)
-            } else {
-                // Fallback to center if can't get mouse position
-                let x = screen_x + (screen_width - window_size.width as f64) / 2.0;
-                let y = screen_y + (screen_height - window_size.height as f64) / 2.0;
-                (x as i32, y as i32)
-            }
-        }
-        1 => {
-            // Center
-            let x = screen_x + (screen_width - window_size.width as f64) / 2.0;
-            let y = screen_y + (screen_height - window_size.height as f64) / 2.0;
-            (x as i32, y as i32)
-        }
-        2 => {
-            // Top-right (with padding)
-            let padding = 20.0;
-            let x = screen_x + screen_width - window_size.width as f64 - padding;
-            let y = screen_y + padding + 30.0; // Account for menu bar
-            (x as i32, y as i32)
-        }
-        _ => {
-            // Default to center
-            let x = screen_x + (screen_width - window_size.width as f64) / 2.0;
-            let y = screen_y + (screen_height - window_size.height as f64) / 2.0;
-            (x as i32, y as i32)
-        }
-    };
-    
-    // Set position and show
-    let _ = window.set_position(PhysicalPosition::new(x, y));
+    // Just show and focus the window - position is handled by set_drawer_mode
     let _ = window.show();
     let _ = window.set_focus();
     
-    log::info!("Window positioned at ({}, {}) with position_type={}", x, y, position_type);
+    log::info!("Window shown and focused (position unchanged)");
 }
 
 #[derive(Clone, serde::Serialize)]

@@ -11,20 +11,21 @@
   },
   "app": {
     "withGlobalTauri": true,
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",
         "title": "TransClip",
-        "width": 900,
-        "height": 500,
-        "x": 100,
-        "y": 100,
+        "width": 1200,
+        "height": 200,
         "visible": true,
         "skipTaskbar": false,
-        "decorations": true,
-        "transparent": false,
-        "alwaysOnTop": false,
-        "resizable": true
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "resizable": true,
+        "minWidth": 400,
+        "minHeight": 80
       }
     ],
     "security": {

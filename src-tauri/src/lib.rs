@@ -3,7 +3,6 @@ mod commands;
 mod database;
 mod hotkey;
 mod keychain;
-mod translate;
 
 use database::Database;
 use std::sync::Arc;
@@ -11,7 +10,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, RunEvent, WindowEvent,
+    Emitter, Manager, RunEvent, WindowEvent,
 };
 use tokio::sync::Mutex;
 
@@ -53,7 +52,8 @@ pub fn run() {
             // Create tray menu
             let quit_item = MenuItem::with_id(app, "quit", "Quit TransClip", true, None::<&str>)?;
             let show_item = MenuItem::with_id(app, "show", "Show History", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+            let settings_item = MenuItem::with_id(app, "settings", "Settings...", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_item, &settings_item, &quit_item])?;
 
             // Create tray icon - simple 32x32 white square
             // 32x32 pixels * 4 bytes (RGBA) = 4096 bytes
@@ -70,6 +70,13 @@ pub fn run() {
                     "show" => {
                         if let Some(window) = app.get_webview_window("main") {
                             hotkey::show_window_at_position(&window);
+                        }
+                    }
+                    "settings" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            hotkey::show_window_at_position(&window);
+                            // Emit event to open settings view
+                            let _ = window.emit("open_settings", ());
                         }
                     }
                     _ => {}
@@ -157,6 +164,17 @@ pub fn run() {
             commands::open_accessibility_settings,
             commands::show_translation_popup,
             commands::hide_translation_popup,
+            // Window management commands
+            commands::get_monitors,
+            commands::get_current_monitor_index,
+            commands::get_window_position,
+            commands::set_window_position,
+            commands::set_window_size,
+            commands::move_to_monitor,
+            commands::toggle_always_on_top,
+            commands::snap_to_bottom,
+            commands::set_drawer_collapsed,
+            commands::set_drawer_mode,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

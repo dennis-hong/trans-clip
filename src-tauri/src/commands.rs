@@ -468,16 +468,23 @@ pub async fn translate(
 }
 
 fn detect_language(text: &str) -> String {
-    // Simple heuristic: if text contains Korean characters, it's Korean
-    let has_korean = text.chars().any(|c| {
+    // Detect based on Korean character ratio (>= 30% = Korean)
+    let (korean, total) = text.chars().fold((0, 0), |(ko, tot), c| {
         let code = c as u32;
-        // Korean Unicode ranges
-        (0xAC00..=0xD7AF).contains(&code) || // Hangul Syllables
-        (0x1100..=0x11FF).contains(&code) || // Hangul Jamo
-        (0x3130..=0x318F).contains(&code)    // Hangul Compatibility Jamo
+        let is_korean = (0xAC00..=0xD7AF).contains(&code)
+            || (0x1100..=0x11FF).contains(&code)
+            || (0x3130..=0x318F).contains(&code);
+
+        if is_korean {
+            (ko + 1, tot + 1)
+        } else if c.is_alphabetic() {
+            (ko, tot + 1)
+        } else {
+            (ko, tot)
+        }
     });
 
-    if has_korean {
+    if total > 0 && (korean as f64 / total as f64) >= 0.3 {
         "ko".to_string()
     } else {
         "en".to_string()
@@ -1308,4 +1315,388 @@ pub async fn hide_translation_popup(app: tauri::AppHandle) -> Result<(), String>
 pub struct Position {
     pub x: f64,
     pub y: f64,
+}
+
+// ============================================
+// Window Management Commands
+// ============================================
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MonitorInfo {
+    pub name: Option<String>,
+    pub position_x: i32,
+    pub position_y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub scale_factor: f64,
+    pub is_primary: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowPosition {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[tauri::command]
+pub async fn get_monitors(app: tauri::AppHandle) -> Result<Vec<MonitorInfo>, String> {
+    let monitors = app.available_monitors().map_err(|e| e.to_string())?;
+    let primary = app.primary_monitor().map_err(|e| e.to_string())?;
+    
+    let mut result = Vec::new();
+    for monitor in monitors.iter() {
+        let pos = monitor.position();
+        let size = monitor.size();
+        let is_primary = primary.as_ref().map_or(false, |p| {
+            p.position() == monitor.position() && p.size() == monitor.size()
+        });
+        
+        result.push(MonitorInfo {
+            name: monitor.name().map(|s| s.to_string()),
+            position_x: pos.x,
+            position_y: pos.y,
+            width: size.width,
+            height: size.height,
+            scale_factor: monitor.scale_factor(),
+            is_primary,
+        });
+    }
+    
+    // Sort monitors by physical position (left to right)
+    // This ensures button 1 = leftmost monitor, button 2 = next monitor, etc.
+    result.sort_by(|a, b| {
+        // Primary sort by x position (left to right)
+        // Secondary sort by y position (top to bottom) for vertically stacked monitors
+        match a.position_x.cmp(&b.position_x) {
+            std::cmp::Ordering::Equal => a.position_y.cmp(&b.position_y),
+            other => other,
+        }
+    });
+    
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn get_window_position(app: tauri::AppHandle) -> Result<WindowPosition, String> {
+    let window = app.get_webview_window("main").ok_or("Window not found")?;
+    let pos = window.outer_position().map_err(|e| e.to_string())?;
+    let size = window.outer_size().map_err(|e| e.to_string())?;
+    
+    Ok(WindowPosition {
+        x: pos.x,
+        y: pos.y,
+        width: size.width,
+        height: size.height,
+    })
+}
+
+#[tauri::command]
+pub async fn set_window_position(
+    app: tauri::AppHandle,
+    x: i32,
+    y: i32,
+) -> Result<(), String> {
+    let window = app.get_webview_window("main").ok_or("Window not found")?;
+    window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }))
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_window_size(
+    app: tauri::AppHandle,
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
+    let window = app.get_webview_window("main").ok_or("Window not found")?;
+    window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }))
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn move_to_monitor(
+    app: tauri::AppHandle,
+    monitor_index: usize,
+    anchor: String,
+) -> Result<(), String> {
+    let monitors = app.available_monitors().map_err(|e| e.to_string())?;
+    
+    log::info!("move_to_monitor: requested index={}, anchor={}", monitor_index, anchor);
+    
+    // Sort monitors by physical position (left to right) to match UI buttons
+    let mut sorted_monitors: Vec<_> = monitors.iter().collect();
+    sorted_monitors.sort_by(|a, b| {
+        let pos_a = a.position();
+        let pos_b = b.position();
+        match pos_a.x.cmp(&pos_b.x) {
+            std::cmp::Ordering::Equal => pos_a.y.cmp(&pos_b.y),
+            other => other,
+        }
+    });
+    
+    if monitor_index >= sorted_monitors.len() {
+        log::error!("Invalid monitor index: {} >= {}", monitor_index, sorted_monitors.len());
+        return Err("Invalid monitor index".to_string());
+    }
+    
+    let window = app.get_webview_window("main").ok_or("Window not found")?;
+    
+    // Get target monitor info
+    let target_monitor = sorted_monitors[monitor_index];
+    let mon_pos = target_monitor.position();
+    let mon_size = target_monitor.size();
+    let target_scale = target_monitor.scale_factor();
+    
+    // Convert target monitor size to logical
+    let mon_logical_width = (mon_size.width as f64 / target_scale) as i32;
+    let mon_logical_height = (mon_size.height as f64 / target_scale) as i32;
+    
+    // Get current window scale
+    let current_scale = window.scale_factor().map_err(|e| e.to_string())?;
+    
+    // Check if we're moving between monitors with different scale factors
+    let scale_differs = (current_scale - target_scale).abs() > 0.01;
+    
+    if scale_differs {
+        // Two-phase move: first move to target monitor center to update scale factor
+        let temp_x = mon_pos.x + mon_logical_width / 2;
+        let temp_y = mon_pos.y + mon_logical_height / 2;
+        
+        log::info!("Scale differs ({} -> {}), moving to target monitor first", current_scale, target_scale);
+        
+        window.set_position(tauri::Position::Logical(tauri::LogicalPosition { 
+            x: temp_x as f64, 
+            y: temp_y as f64 
+        })).map_err(|e| e.to_string())?;
+        
+        // Small delay to let the window update its scale factor
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    }
+    
+    // Now get the accurate window size (after scale factor update if needed)
+    let win_size = window.outer_size().map_err(|e| e.to_string())?;
+    let win_scale = window.scale_factor().map_err(|e| e.to_string())?;
+    let win_logical_width = (win_size.width as f64 / win_scale) as i32;
+    let win_logical_height = (win_size.height as f64 / win_scale) as i32;
+    
+    log::info!("Window scale: {}, logical size: {}x{}", win_scale, win_logical_width, win_logical_height);
+    log::info!("Target monitor[{}]: pos=({}, {}), logical size={}x{}, scale={}", 
+        monitor_index, mon_pos.x, mon_pos.y, mon_logical_width, mon_logical_height, target_scale);
+    
+    // Calculate final position based on anchor using logical coordinates
+    let (x, y) = match anchor.as_str() {
+        "bottom" => {
+            let x = mon_pos.x + (mon_logical_width - win_logical_width) / 2;
+            let y = mon_pos.y + mon_logical_height - win_logical_height;
+            (x, y)
+        }
+        "top" => {
+            let x = mon_pos.x + (mon_logical_width - win_logical_width) / 2;
+            let y = mon_pos.y;
+            (x, y)
+        }
+        "center" => {
+            let x = mon_pos.x + (mon_logical_width - win_logical_width) / 2;
+            let y = mon_pos.y + (mon_logical_height - win_logical_height) / 2;
+            (x, y)
+        }
+        _ => {
+            let x = mon_pos.x + (mon_logical_width - win_logical_width) / 2;
+            let y = mon_pos.y + mon_logical_height - win_logical_height;
+            (x, y)
+        }
+    };
+    
+    log::info!("Setting final window position (logical) to: ({}, {})", x, y);
+    
+    window.set_position(tauri::Position::Logical(tauri::LogicalPosition { 
+        x: x as f64, 
+        y: y as f64 
+    })).map_err(|e| e.to_string())?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_current_monitor_index(app: tauri::AppHandle) -> Result<usize, String> {
+    let window = app.get_webview_window("main").ok_or("Window not found")?;
+    let win_pos = window.outer_position().map_err(|e| e.to_string())?;
+    let win_size = window.outer_size().map_err(|e| e.to_string())?;
+    
+    let monitors = app.available_monitors().map_err(|e| e.to_string())?;
+    
+    // Sort monitors by physical position (left to right) to match UI buttons
+    let mut sorted_monitors: Vec<_> = monitors.iter().enumerate().collect();
+    sorted_monitors.sort_by(|(_, a), (_, b)| {
+        let pos_a = a.position();
+        let pos_b = b.position();
+        match pos_a.x.cmp(&pos_b.x) {
+            std::cmp::Ordering::Equal => pos_a.y.cmp(&pos_b.y),
+            other => other,
+        }
+    });
+    
+    // Find which monitor the window center is on
+    let win_center_x = win_pos.x + win_size.width as i32 / 2;
+    let win_center_y = win_pos.y + win_size.height as i32 / 2;
+    
+    for (sorted_index, (_, monitor)) in sorted_monitors.iter().enumerate() {
+        let mon_pos = monitor.position();
+        let mon_size = monitor.size();
+        
+        if win_center_x >= mon_pos.x && win_center_x < mon_pos.x + mon_size.width as i32 &&
+           win_center_y >= mon_pos.y && win_center_y < mon_pos.y + mon_size.height as i32 {
+            return Ok(sorted_index);
+        }
+    }
+    
+    // Default to first monitor if not found
+    Ok(0)
+}
+
+#[tauri::command]
+pub async fn toggle_always_on_top(app: tauri::AppHandle) -> Result<bool, String> {
+    let window = app.get_webview_window("main").ok_or("Window not found")?;
+    let current = window.is_always_on_top().map_err(|e| e.to_string())?;
+    window.set_always_on_top(!current).map_err(|e| e.to_string())?;
+    Ok(!current)
+}
+
+#[tauri::command]
+pub async fn snap_to_bottom(app: tauri::AppHandle) -> Result<(), String> {
+    let window = app.get_webview_window("main").ok_or("Window not found")?;
+    let win_pos = window.outer_position().map_err(|e| e.to_string())?;
+    let win_size = window.outer_size().map_err(|e| e.to_string())?;
+    
+    // Find which monitor the window is on
+    let monitors = app.available_monitors().map_err(|e| e.to_string())?;
+    let mut target_monitor = monitors.first().ok_or("No monitors found")?;
+    
+    for monitor in monitors.iter() {
+        let mon_pos = monitor.position();
+        let mon_size = monitor.size();
+        let scale = monitor.scale_factor();
+        
+        // Convert to logical coordinates for comparison
+        let mon_logical_width = (mon_size.width as f64 / scale) as i32;
+        let mon_logical_height = (mon_size.height as f64 / scale) as i32;
+        
+        // Check if window center is within this monitor (using logical coordinates)
+        // win_pos is already in physical pixels, convert to logical
+        let win_logical_x = (win_pos.x as f64 / scale) as i32;
+        let win_logical_y = (win_pos.y as f64 / scale) as i32;
+        let win_logical_width = (win_size.width as f64 / scale) as i32;
+        let win_logical_height = (win_size.height as f64 / scale) as i32;
+        
+        let win_center_x = win_logical_x + win_logical_width / 2;
+        let win_center_y = win_logical_y + win_logical_height / 2;
+        
+        if win_center_x >= mon_pos.x && win_center_x < mon_pos.x + mon_logical_width &&
+           win_center_y >= mon_pos.y && win_center_y < mon_pos.y + mon_logical_height {
+            target_monitor = monitor;
+            break;
+        }
+    }
+    
+    let mon_pos = target_monitor.position();
+    let mon_size = target_monitor.size();
+    let scale = target_monitor.scale_factor();
+    
+    // Convert to logical coordinates
+    let mon_logical_height = (mon_size.height as f64 / scale) as i32;
+    let win_logical_x = (win_pos.x as f64 / scale) as i32;
+    let win_logical_height = (win_size.height as f64 / scale) as i32;
+    
+    // Keep x position, snap y to bottom (using logical coordinates)
+    let new_y = mon_pos.y + mon_logical_height - win_logical_height;
+    
+    window.set_position(tauri::Position::Logical(tauri::LogicalPosition { 
+        x: win_logical_x as f64, 
+        y: new_y as f64 
+    })).map_err(|e| e.to_string())?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_drawer_collapsed(
+    app: tauri::AppHandle,
+    collapsed: bool,
+) -> Result<(), String> {
+    // Legacy wrapper for backwards compatibility
+    let mode = if collapsed { "collapsed" } else { "expanded" };
+    set_drawer_mode(app, mode.to_string()).await
+}
+
+#[tauri::command]
+pub async fn set_drawer_mode(
+    app: tauri::AppHandle,
+    mode: String,
+) -> Result<(), String> {
+    let window = app.get_webview_window("main").ok_or("Window not found")?;
+    let win_pos = window.outer_position().map_err(|e| e.to_string())?;
+    let win_size = window.outer_size().map_err(|e| e.to_string())?;
+
+    // Find which monitor the window is on using physical coordinates
+    let monitors = app.available_monitors().map_err(|e| e.to_string())?;
+    let mut target_monitor = monitors.first().ok_or("No monitors found")?;
+
+    let win_center_x = win_pos.x + win_size.width as i32 / 2;
+    let win_center_y = win_pos.y + win_size.height as i32 / 2;
+
+    for monitor in monitors.iter() {
+        let mon_pos = monitor.position();
+        let mon_size = monitor.size();
+
+        // Check if window center is within this monitor (physical coordinates)
+        if win_center_x >= mon_pos.x && win_center_x < mon_pos.x + mon_size.width as i32 &&
+           win_center_y >= mon_pos.y && win_center_y < mon_pos.y + mon_size.height as i32 {
+            target_monitor = monitor;
+            break;
+        }
+    }
+
+    let mon_pos = target_monitor.position();
+    let mon_size = target_monitor.size();
+    let scale = target_monitor.scale_factor();
+
+    // Convert monitor size to logical coordinates
+    let mon_logical_width = (mon_size.width as f64 / scale) as i32;
+    let mon_logical_height = (mon_size.height as f64 / scale) as i32;
+
+    // Set new size based on mode (in logical pixels)
+    // Width: 1200 for all modes (default app width)
+    // Height: varies by mode
+    let (new_logical_width, new_logical_height) = match mode.as_str() {
+        "collapsed" => (1200, 48),    // Just header
+        "expanded" => (1200, 200),    // History view
+        "full" => (1200, 450),        // Settings/Glossary view
+        "popup" => (1200, 350),       // Translation/Polish popup view
+        _ => (1200, 200),
+    };
+
+    // Set new size using logical coordinates
+    window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+        width: new_logical_width as f64,
+        height: new_logical_height as f64
+    })).map_err(|e| e.to_string())?;
+
+    // Position at bottom center of the current monitor
+    let new_x = mon_pos.x + (mon_logical_width - new_logical_width) / 2;
+    let new_y = mon_pos.y + mon_logical_height - new_logical_height;
+
+    window.set_position(tauri::Position::Logical(tauri::LogicalPosition {
+        x: new_x as f64,
+        y: new_y as f64
+    })).map_err(|e| e.to_string())?;
+
+    log::info!("set_drawer_mode: mode={}, size={}x{}, pos=({}, {})", 
+        mode, new_logical_width, new_logical_height, new_x, new_y);
+
+    Ok(())
 }

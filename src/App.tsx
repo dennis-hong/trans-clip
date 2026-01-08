@@ -1,32 +1,21 @@
 import { useState, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { DrawerPanel } from "@/components/DrawerPanel";
 import { TranslationPopup } from "@/components/TranslationPopup";
 import { PolishPopup } from "@/components/PolishPopup";
-import { SettingsPanel } from "@/components/Settings/SettingsPanel";
-import { HistoryPanel } from "@/components/ClipboardHistory/HistoryPanel";
-import { GlossaryList } from "@/components/GlossaryManager/GlossaryList";
 import type { DoubleCopyPayload, PolishPayload } from "@/types";
 
-type Tab = "translate" | "history" | "glossary" | "settings";
 type PopupMode = "none" | "translate" | "polish";
 
 function App() {
-  const [activeTab, setActiveTab] = useState<Tab>("translate");
-  const [sourceText, setSourceText] = useState<string | null>(null);
   const [popupMode, setPopupMode] = useState<PopupMode>("none");
+  const [sourceText, setSourceText] = useState<string | null>(null);
   const [hasAccessibility, setHasAccessibility] = useState<boolean | null>(null);
-
-  // Legacy state for compatibility
-  const isTranslating = popupMode === "translate";
-  const isPolishing = popupMode === "polish";
 
   // Check accessibility permission on mount
   useEffect(() => {
-    // Skip polling if permission is already granted
-    if (hasAccessibility === true) {
-      return;
-    }
+    if (hasAccessibility === true) return;
 
     const checkPermission = async () => {
       try {
@@ -37,201 +26,105 @@ function App() {
         setHasAccessibility(false);
       }
     };
-    
+
     checkPermission();
-    
-    // Re-check periodically only if permission is not yet granted
     const interval = setInterval(checkPermission, 3000);
     return () => clearInterval(interval);
   }, [hasAccessibility]);
 
-  // Listen for double copy events from backend (Cmd+CC for translation)
+  // Position window at bottom on mount
   useEffect(() => {
-    const unlisten = listen<DoubleCopyPayload>(
-      "double_copy_detected",
-      (event) => {
-        const { text } = event.payload;
-        if (text && text.trim()) {
-          setSourceText(text);
-          setPopupMode("translate");
-          setActiveTab("translate");
-        }
+    const positionWindow = async () => {
+      try {
+        await invoke("move_to_monitor", { monitorIndex: 0, anchor: "bottom" });
+      } catch (err) {
+        console.error("Failed to position window:", err);
       }
-    );
-
-    return () => {
-      unlisten.then((fn) => fn());
     };
+    positionWindow();
   }, []);
 
-  // Listen for polish events from backend (Cmd+Shift+CC for polishing)
+  // Note: Keyboard shortcuts for monitor switching are handled in DrawerPanel.tsx
+  // to avoid duplicate calls and to update the currentMonitor state
+
+  // Listen for double copy events (Cmd+CC for translation)
   useEffect(() => {
-    const unlisten = listen<PolishPayload>(
-      "polish_detected",
-      (event) => {
-        const { text } = event.payload;
-        if (text && text.trim()) {
-          setSourceText(text);
-          setPopupMode("polish");
-          setActiveTab("translate");
-        }
-      }
-    );
-
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, []);
-
-  const handleClosePopup = useCallback(async () => {
-    setPopupMode("none");
-    setSourceText(null);
-  }, []);
-
-  // Manual translate trigger for testing
-  const handleManualTranslate = async () => {
-    try {
-      const text = await navigator.clipboard.readText();
+    const unlisten = listen<DoubleCopyPayload>("double_copy_detected", (event) => {
+      const { text } = event.payload;
       if (text && text.trim()) {
         setSourceText(text);
         setPopupMode("translate");
       }
-    } catch (err) {
-      console.error("Failed to read clipboard:", err);
-    }
-  };
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
 
-  // Manual polish trigger for testing
-  const handleManualPolish = async () => {
-    try {
-      const text = await navigator.clipboard.readText();
+  // Listen for polish events (Cmd+DD for polishing)
+  useEffect(() => {
+    const unlisten = listen<PolishPayload>("polish_detected", (event) => {
+      const { text } = event.payload;
       if (text && text.trim()) {
         setSourceText(text);
         setPopupMode("polish");
       }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // Adjust window size when popup mode changes
+  useEffect(() => {
+    const updateWindowMode = async () => {
+      if (popupMode === "translate" || popupMode === "polish") {
+        try {
+          await invoke("set_drawer_mode", { mode: "popup" });
+        } catch (err) {
+          console.error("Failed to set popup mode:", err);
+        }
+      }
+    };
+    updateWindowMode();
+  }, [popupMode]);
+
+  const handleClosePopup = useCallback(async () => {
+    setPopupMode("none");
+    setSourceText(null);
+    // Return to expanded drawer mode
+    try {
+      await invoke("set_drawer_mode", { mode: "expanded" });
     } catch (err) {
-      console.error("Failed to read clipboard:", err);
+      console.error("Failed to set drawer mode:", err);
     }
-  };
+  }, []);
 
-  const tabs: { id: Tab; label: string; icon: string }[] = [
-    { id: "translate", label: "Translate", icon: "🌐" },
-    { id: "history", label: "History", icon: "📋" },
-    { id: "glossary", label: "Glossary", icon: "📖" },
-    { id: "settings", label: "Settings", icon: "⚙️" },
-  ];
+  // Show translation/polish popup if active
+  if (popupMode === "translate" && sourceText) {
+    return (
+      <div className="h-screen w-full overflow-hidden bg-transparent">
+        <div className="h-full flex flex-col bg-white/95 backdrop-blur-md rounded-t-2xl border border-gray-200/50 border-b-0 shadow-2xl">
+          <TranslationPopup sourceText={sourceText} onClose={handleClosePopup} />
+        </div>
+      </div>
+    );
+  }
 
+  if (popupMode === "polish" && sourceText) {
+    return (
+      <div className="h-screen w-full overflow-hidden bg-transparent">
+        <div className="h-full flex flex-col bg-white/95 backdrop-blur-md rounded-t-2xl border border-gray-200/50 border-b-0 shadow-2xl">
+          <PolishPopup sourceText={sourceText} onClose={handleClosePopup} />
+        </div>
+      </div>
+    );
+  }
+
+  // Default: show drawer panel
   return (
-    <div className="flex flex-col h-screen bg-white dark:bg-gray-900">
-      {/* Tab Navigation */}
-      <div className="flex border-b border-gray-200 dark:border-gray-700">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex-1 flex items-center justify-center gap-1 px-2 py-2 text-sm font-medium whitespace-nowrap transition-colors ${
-              activeTab === tab.id
-                ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400"
-                : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200"
-            }`}
-          >
-            <span>{tab.icon}</span>
-            <span>{tab.label}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* Tab Content */}
-      <div className="flex-1 overflow-hidden">
-        {activeTab === "translate" && (
-          <div className="h-full flex flex-col">
-            {isTranslating && sourceText ? (
-              <TranslationPopup sourceText={sourceText} onClose={handleClosePopup} />
-            ) : isPolishing && sourceText ? (
-              <PolishPopup sourceText={sourceText} onClose={handleClosePopup} />
-            ) : (
-              <div className="flex-1 flex flex-col items-center justify-center p-4">
-                <div className="text-center space-y-4">
-                  {/* Accessibility Permission Warning */}
-                  {hasAccessibility === false && (
-                    <div className="mb-4 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg max-w-sm">
-                      <div className="flex items-start gap-3">
-                        <svg
-                          className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                          />
-                        </svg>
-                        <div className="text-left">
-                          <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-                            Accessibility Permission Required
-                          </p>
-                          <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                            Required for hotkey detection.
-                          </p>
-                          <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
-                            Grant permission in:<br />
-                            <span className="font-medium">System Settings → Privacy & Security → Accessibility</span>
-                          </p>
-                          <button
-                            onClick={() => invoke("open_accessibility_settings")}
-                            className="mt-3 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium rounded-md transition-colors"
-                          >
-                            Open Settings
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Hotkey Instructions */}
-                  <div className="space-y-2">
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      <span className="font-mono font-medium text-gray-700 dark:text-gray-300">Cmd+C+C</span>
-                      <span className="mx-2">→</span>
-                      <span>번역</span>
-                    </p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      <span className="font-mono font-medium text-gray-700 dark:text-gray-300">Cmd+D+D</span>
-                      <span className="mx-2">→</span>
-                      <span>글 다듬기</span>
-                    </p>
-                  </div>
-
-                  {/* Manual Buttons */}
-                  <div className="flex gap-2 justify-center">
-                    <button
-                      onClick={handleManualTranslate}
-                      className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors"
-                    >
-                      🌐 번역하기
-                    </button>
-                    <button
-                      onClick={handleManualPolish}
-                      className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg text-sm font-medium transition-colors"
-                    >
-                      ✏️ 글 다듬기
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === "history" && <HistoryPanel />}
-
-        {activeTab === "glossary" && <GlossaryList />}
-
-        {activeTab === "settings" && <SettingsPanel />}
-      </div>
+    <div className="h-screen w-full overflow-hidden bg-transparent">
+      <DrawerPanel hasAccessibility={hasAccessibility} />
     </div>
   );
 }

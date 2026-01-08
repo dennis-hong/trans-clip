@@ -41,3 +41,39 @@ body {
 body {
   background-color: transparent;
 }
+
+/* Line clamp utility */
+.line-clamp-4 {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Custom scrollbar for drawer */
+.drawer-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+
+.drawer-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.drawer-scroll::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.5);
+  border-radius: 3px;
+}
+
+.drawer-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(156, 163, 175, 0.7);
+}
+
+/* Hide scrollbar when not hovering */
+.hide-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
