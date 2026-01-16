@@ -38,6 +38,11 @@ pub struct PolishPayload {
     pub timestamp: String,
 }
 
+#[derive(Clone, serde::Serialize)]
+pub struct ShowHistoryPayload {
+    pub timestamp: String,
+}
+
 // ============================================
 // macOS Implementation using CGEventTap (raw FFI)
 // ============================================
@@ -53,9 +58,11 @@ mod macos {
     // Key codes on macOS
     const KEY_C: i64 = 8;
     const KEY_D: i64 = 2;
+    const KEY_V: i64 = 9;
 
     // CGEventFlags
     const K_CG_EVENT_FLAG_MASK_COMMAND: u64 = 0x00100000;
+    const K_CG_EVENT_FLAG_MASK_SHIFT: u64 = 0x00020000;
 
     // CGEventTap types
     type CGEventRef = *mut c_void;
@@ -140,8 +147,10 @@ mod macos {
             let flags = CGEventGetFlags(event);
 
             let is_cmd_pressed = (flags & K_CG_EVENT_FLAG_MASK_COMMAND) != 0;
+            let is_shift_pressed = (flags & K_CG_EVENT_FLAG_MASK_SHIFT) != 0;
             let is_c_key = keycode == KEY_C;
             let is_d_key = keycode == KEY_D;
+            let is_v_key = keycode == KEY_V;
 
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -150,8 +159,23 @@ mod macos {
 
             let interval = DOUBLE_PRESS_INTERVAL_MS.load(Ordering::SeqCst);
 
+            // Cmd+Shift+V detected - show clipboard history
+            if is_cmd_pressed && is_shift_pressed && is_v_key {
+                log::info!("Cmd+Shift+V detected! Showing clipboard history");
+                
+                // Reset timers to prevent interference
+                LAST_CMD_C_TIME.store(0, Ordering::SeqCst);
+                LAST_CMD_D_TIME.store(0, Ordering::SeqCst);
+                
+                thread::spawn(|| {
+                    trigger_show_history();
+                });
+                
+                return event;
+            }
+
             // Cmd+C detected - check for double-press for Translation
-            if is_cmd_pressed && is_c_key {
+            if is_cmd_pressed && !is_shift_pressed && is_c_key {
                 let last_time = LAST_CMD_C_TIME.swap(now, Ordering::SeqCst);
                 
                 // Reset D timer to prevent cross-triggering
@@ -166,13 +190,13 @@ mod macos {
                     // Small delay to let the clipboard update from the copy action
                     thread::spawn(|| {
                         thread::sleep(std::time::Duration::from_millis(100));
-                        trigger_translation();
+                        trigger_translation_or_history();
                     });
                 }
             }
 
             // Cmd+D detected - check for double-press for Polish
-            if is_cmd_pressed && is_d_key {
+            if is_cmd_pressed && !is_shift_pressed && is_d_key {
                 let last_time = LAST_CMD_D_TIME.swap(now, Ordering::SeqCst);
                 
                 // Reset C timer to prevent cross-triggering
@@ -237,7 +261,7 @@ mod macos {
         }
     }
 
-    fn trigger_translation() {
+    fn trigger_translation_or_history() {
         if let Some(app_handle) = APP_HANDLE.get() {
             // Get clipboard text
             match get_clipboard_text() {
@@ -259,10 +283,44 @@ mod macos {
                     }
                 }
                 Ok(_) => {
-                    log::info!("Clipboard is empty, skipping translation");
+                    // Clipboard is empty - show history instead
+                    log::info!("Clipboard is empty, showing history panel");
+                    trigger_show_history();
                 }
                 Err(e) => {
                     log::error!("Failed to get clipboard text: {}", e);
+                    // On error, also show history as fallback
+                    trigger_show_history();
+                }
+            }
+        }
+    }
+
+    fn trigger_show_history() {
+        if let Some(app_handle) = APP_HANDLE.get() {
+            if let Some(window) = app_handle.get_webview_window("main") {
+                // Check if window is visible - if so, hide it (toggle behavior)
+                if let Ok(is_visible) = window.is_visible() {
+                    if is_visible {
+                        log::info!("Window is visible, hiding it (toggle)");
+                        let _ = window.hide();
+                        return;
+                    }
+                }
+            }
+
+            let payload = ShowHistoryPayload {
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            };
+
+            if let Err(e) = app_handle.emit("show_history", payload) {
+                log::error!("Failed to emit show_history event: {}", e);
+            } else {
+                log::info!("Emitted show_history event");
+
+                // Show and focus the window at the configured position
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    show_window_at_position(&window);
                 }
             }
         }

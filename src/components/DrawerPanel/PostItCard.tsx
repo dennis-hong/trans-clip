@@ -3,10 +3,13 @@ import type { ClipboardItem } from "@/types";
 
 interface PostItCardProps {
   item: ClipboardItem;
+  index?: number;
   color?: string;
   onCopy: (item: ClipboardItem) => void;
+  onPaste?: (item: ClipboardItem) => void;
   onDelete: (id: string) => void;
   onTogglePin: (id: string) => void;
+  showPasteButton?: boolean;
 }
 
 const COLORS = [
@@ -23,16 +26,27 @@ function getColorFromId(id: string): string {
   for (let i = 0; i < id.length; i++) {
     hash = id.charCodeAt(i) + ((hash << 5) - hash);
   }
-  return COLORS[Math.abs(hash) % COLORS.length];
+  const colorIndex = Math.abs(hash) % COLORS.length;
+  return COLORS[colorIndex] || "bg-yellow-100 border-yellow-300";
 }
 
-export function PostItCard({ item, color, onCopy, onDelete, onTogglePin }: PostItCardProps) {
+export function PostItCard({ item, index, color, onCopy, onPaste, onDelete, onTogglePin, showPasteButton }: PostItCardProps) {
   const [isHovered, setIsHovered] = useState(false);
   const cardColor = color || getColorFromId(item.id);
 
   const handleCopy = useCallback(() => {
     onCopy(item);
   }, [item, onCopy]);
+
+  const handlePaste = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (onPaste) {
+        onPaste(item);
+      }
+    },
+    [item, onPaste]
+  );
 
   const handleDelete = useCallback(
     (e: React.MouseEvent) => {
@@ -66,7 +80,7 @@ export function PostItCard({ item, color, onCopy, onDelete, onTogglePin }: PostI
 
   // Extract title from content (first line or first 20 chars)
   const getTitle = (content: string): string => {
-    const firstLine = content.split("\n")[0].trim();
+    const firstLine = (content.split("\n")[0] ?? "").trim();
     if (firstLine.length <= 30) return firstLine;
     return firstLine.substring(0, 27) + "...";
   };
@@ -87,6 +101,13 @@ export function PostItCard({ item, color, onCopy, onDelete, onTogglePin }: PostI
         transform: isHovered ? "scale(1.05) translateY(-4px)" : "none",
       }}
     >
+      {/* Quick select number badge (1-9) */}
+      {index !== undefined && index < 9 && (
+        <div className="absolute -top-2 -left-2 w-5 h-5 bg-gray-700 text-white rounded-full flex items-center justify-center shadow-md text-xs font-bold">
+          {index + 1}
+        </div>
+      )}
+
       {/* Pin indicator */}
       {item.isPinned && (
         <div className="absolute -top-2 -right-2 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center shadow-md">
@@ -119,6 +140,23 @@ export function PostItCard({ item, color, onCopy, onDelete, onTogglePin }: PostI
             isHovered ? "opacity-100" : "opacity-0"
           }`}
         >
+          {/* Paste button - only shown in stealth mode */}
+          {showPasteButton && onPaste && (
+            <button
+              onClick={handlePaste}
+              className="p-1 rounded hover:bg-black/10 transition-colors"
+              title="붙여넣기"
+            >
+              <svg className="w-3.5 h-3.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                />
+              </svg>
+            </button>
+          )}
           <button
             onClick={handleTogglePin}
             className="p-1 rounded hover:bg-black/10 transition-colors"

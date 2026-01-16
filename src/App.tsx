@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { DrawerPanel } from "@/components/DrawerPanel";
 import { TranslationPopup } from "@/components/TranslationPopup";
 import { PolishPopup } from "@/components/PolishPopup";
-import type { DoubleCopyPayload, PolishPayload } from "@/types";
+import type { DoubleCopyPayload, PolishPayload, ShowHistoryPayload } from "@/types";
 
-type PopupMode = "none" | "translate" | "polish";
+type PopupMode = "none" | "translate" | "polish" | "history";
 
 function App() {
   const [popupMode, setPopupMode] = useState<PopupMode>("none");
@@ -75,6 +76,17 @@ function App() {
     };
   }, []);
 
+  // Listen for show_history events (Cmd+Shift+V or tray click)
+  useEffect(() => {
+    const unlisten = listen<ShowHistoryPayload>("show_history", () => {
+      setPopupMode("history");
+      setSourceText(null);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
   // Adjust window size when popup mode changes
   useEffect(() => {
     const updateWindowMode = async () => {
@@ -84,21 +96,39 @@ function App() {
         } catch (err) {
           console.error("Failed to set popup mode:", err);
         }
+      } else if (popupMode === "history") {
+        try {
+          await invoke("set_drawer_mode", { mode: "expanded" });
+        } catch (err) {
+          console.error("Failed to set expanded mode:", err);
+        }
       }
     };
     updateWindowMode();
   }, [popupMode]);
 
+  // Hide window completely (stealth mode)
+  const hideWindow = useCallback(async () => {
+    try {
+      const window = getCurrentWindow();
+      await window.hide();
+    } catch (err) {
+      console.error("Failed to hide window:", err);
+    }
+  }, []);
+
   const handleClosePopup = useCallback(async () => {
     setPopupMode("none");
     setSourceText(null);
-    // Return to expanded drawer mode
-    try {
-      await invoke("set_drawer_mode", { mode: "expanded" });
-    } catch (err) {
-      console.error("Failed to set drawer mode:", err);
-    }
-  }, []);
+    // Hide window instead of staying visible (stealth mode)
+    await hideWindow();
+  }, [hideWindow]);
+
+  // Handle closing history panel
+  const handleCloseHistory = useCallback(async () => {
+    setPopupMode("none");
+    await hideWindow();
+  }, [hideWindow]);
 
   // Show translation/polish popup if active
   if (popupMode === "translate" && sourceText) {
@@ -121,10 +151,28 @@ function App() {
     );
   }
 
-  // Default: show drawer panel
+  // History mode: show drawer panel with close handler
+  if (popupMode === "history") {
+    return (
+      <div className="h-screen w-full overflow-hidden bg-transparent">
+        <DrawerPanel 
+          hasAccessibility={hasAccessibility} 
+          onClose={handleCloseHistory}
+          isStealthMode={true}
+        />
+      </div>
+    );
+  }
+
+  // Default (none): should not render as window is hidden
+  // But if somehow visible, show drawer panel
   return (
     <div className="h-screen w-full overflow-hidden bg-transparent">
-      <DrawerPanel hasAccessibility={hasAccessibility} />
+      <DrawerPanel 
+        hasAccessibility={hasAccessibility} 
+        onClose={handleCloseHistory}
+        isStealthMode={true}
+      />
     </div>
   );
 }

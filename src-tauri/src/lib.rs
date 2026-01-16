@@ -70,6 +70,8 @@ pub fn run() {
                     "show" => {
                         if let Some(window) = app.get_webview_window("main") {
                             hotkey::show_window_at_position(&window);
+                            // Emit event to open history view
+                            let _ = window.emit("show_history", ());
                         }
                     }
                     "settings" => {
@@ -91,6 +93,8 @@ pub fn run() {
                         let app = tray.app_handle();
                         if let Some(window) = app.get_webview_window("main") {
                             hotkey::show_window_at_position(&window);
+                            // Emit event to open history view
+                            let _ = window.emit("show_history", ());
                         }
                     }
                 })
@@ -129,6 +133,13 @@ pub fn run() {
                 log::error!("Failed to start clipboard monitor: {}", e);
             } else {
                 log::info!("Clipboard monitor started successfully");
+            }
+
+            // Hide window on startup - app starts in "hidden" mode
+            // Users can show it via tray icon, Cmd+Shift+V, or Cmd+CC/DD
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.hide();
+                log::info!("Window hidden on startup (stealth mode)");
             }
 
             Ok(())

@@ -23,9 +23,11 @@ type DrawerMode = "collapsed" | "expanded" | "full";
 
 interface DrawerPanelProps {
   hasAccessibility?: boolean | null;
+  onClose?: () => void;
+  isStealthMode?: boolean;
 }
 
-export function DrawerPanel({ hasAccessibility }: DrawerPanelProps) {
+export function DrawerPanel({ hasAccessibility, onClose, isStealthMode }: DrawerPanelProps) {
   const [currentView, setCurrentView] = useState<DrawerView>("history");
   const [drawerMode, setDrawerMode] = useState<DrawerMode>("expanded");
   const [searchQuery, setSearchQuery] = useState("");
@@ -65,9 +67,17 @@ export function DrawerPanel({ hasAccessibility }: DrawerPanelProps) {
   }, []);
 
   // Keyboard shortcuts for monitor switching (Alt+1, Alt+2, Alt+3)
+  // and quick selection (number keys 1-9) and ESC to close
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
-      // Alt/Option + number keys (1, 2, 3)
+      // ESC key - close the panel (in stealth mode)
+      if (e.key === "Escape" && isStealthMode && onClose) {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+
+      // Alt/Option + number keys (1, 2, 3) - monitor switching
       // Use e.code instead of e.key because Option+number produces special characters on macOS
       if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
         let monitorIndex = -1;
@@ -88,12 +98,53 @@ export function DrawerPanel({ hasAccessibility }: DrawerPanelProps) {
             console.error(`Failed to move to monitor ${monitorIndex + 1}:`, err);
           }
         }
+        return;
+      }
+
+      // Number keys (1-9) without modifiers - quick selection in history view
+      if (currentView === "history" && !e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+        // Arrow keys for scrolling (left/right)
+        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+          e.preventDefault();
+          if (scrollRef.current) {
+            // Card width (w-48 = 192px) + gap (gap-4 = 16px) = 208px
+            const scrollAmount = 208;
+            const direction = e.key === "ArrowLeft" ? -1 : 1;
+            scrollRef.current.scrollBy({
+              left: scrollAmount * direction,
+              behavior: "smooth",
+            });
+          }
+          return;
+        }
+
+        const itemIndex = parseInt(e.key) - 1;
+        // Sort items: pinned first, then unpinned
+        const pinnedItems = items.filter((item) => item.isPinned);
+        const unpinnedItems = items.filter((item) => !item.isPinned);
+        const sortedItemsList = [...pinnedItems, ...unpinnedItems];
+        
+        const item = sortedItemsList[itemIndex];
+        if (itemIndex >= 0 && itemIndex < 9 && item) {
+          e.preventDefault();
+          // Copy to clipboard
+          invoke("set_clipboard", { text: item.content }).then(() => {
+            setToast({ message: "클립보드에 복사됨!", type: "success" });
+            // In stealth mode, close after copying
+            if (isStealthMode && onClose) {
+              setTimeout(() => onClose(), 300);
+            }
+          }).catch((err) => {
+            console.error("Failed to copy:", err);
+            setToast({ message: "복사 실패", type: "error" });
+          });
+        }
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [monitors.length]);
+  }, [monitors.length, currentView, items, isStealthMode, onClose]);
 
   const loadMonitors = async () => {
     try {
@@ -130,11 +181,29 @@ export function DrawerPanel({ hasAccessibility }: DrawerPanelProps) {
     try {
       await invoke("set_clipboard", { text: item.content });
       setToast({ message: "클립보드에 복사됨!", type: "success" });
+      // In stealth mode, close after copying
+      if (isStealthMode && onClose) {
+        setTimeout(() => onClose(), 300);
+      }
     } catch (err) {
       console.error("Failed to copy:", err);
       setToast({ message: "복사 실패", type: "error" });
     }
-  }, []);
+  }, [isStealthMode, onClose]);
+
+  const handlePaste = useCallback(async (item: ClipboardItem) => {
+    try {
+      await invoke("paste_text", { text: item.content });
+      setToast({ message: "붙여넣기 완료!", type: "success" });
+      // In stealth mode, close after pasting
+      if (isStealthMode && onClose) {
+        setTimeout(() => onClose(), 100);
+      }
+    } catch (err) {
+      console.error("Failed to paste:", err);
+      setToast({ message: "붙여넣기 실패", type: "error" });
+    }
+  }, [isStealthMode, onClose]);
 
   const handleDelete = useCallback(
     async (id: string) => {
@@ -368,6 +437,9 @@ export function DrawerPanel({ hasAccessibility }: DrawerPanelProps) {
           <div className="hidden sm:flex items-center gap-1 text-[10px] text-gray-400">
             <span className="font-mono bg-gray-100 px-1 rounded">⌘CC</span>
             <span className="font-mono bg-gray-100 px-1 rounded">⌘DD</span>
+            <span className="font-mono bg-gray-100 px-1 rounded">⌘⇧V</span>
+            {isStealthMode && <span className="font-mono bg-gray-100 px-1 rounded">1-9</span>}
+            <span className="font-mono bg-gray-100 px-1 rounded">←→</span>
           </div>
         )}
 
@@ -411,26 +483,49 @@ export function DrawerPanel({ hasAccessibility }: DrawerPanelProps) {
           </button>
         )}
 
-        {/* Collapse button */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            handleToggleCollapse();
-          }}
-          className="p-1.5 rounded-lg hover:bg-gray-200/80 transition-colors"
-          title={isCollapsed ? "펼치기" : "접기"}
-        >
-          <svg
-            className={`w-4 h-4 text-gray-500 transition-transform duration-200 ${
-              isCollapsed ? "rotate-180" : ""
-            }`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
+        {/* Collapse button - only show when not in stealth mode */}
+        {!isStealthMode && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleToggleCollapse();
+            }}
+            className="p-1.5 rounded-lg hover:bg-gray-200/80 transition-colors"
+            title={isCollapsed ? "펼치기" : "접기"}
           >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
+            <svg
+              className={`w-4 h-4 text-gray-500 transition-transform duration-200 ${
+                isCollapsed ? "rotate-180" : ""
+              }`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+        )}
+
+        {/* Close button - only show in stealth mode */}
+        {isStealthMode && onClose && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
+            className="p-1.5 rounded-lg hover:bg-gray-200/80 transition-colors"
+            title="닫기 (ESC)"
+          >
+            <svg
+              className="w-4 h-4 text-gray-500"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Content */}
@@ -470,13 +565,16 @@ export function DrawerPanel({ hasAccessibility }: DrawerPanelProps) {
                   </p>
                 </div>
               ) : (
-                sortedItems.map((item) => (
+                sortedItems.map((item, index) => (
                   <PostItCard
                     key={item.id}
                     item={item}
+                    index={index}
                     onCopy={handleCopy}
+                    onPaste={handlePaste}
                     onDelete={handleDelete}
                     onTogglePin={handleTogglePin}
+                    showPasteButton={isStealthMode}
                   />
                 ))
               )}
