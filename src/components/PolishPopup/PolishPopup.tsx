@@ -1,6 +1,5 @@
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Button } from "@/components/common";
 import { usePolish } from "@/hooks/usePolish";
 import {
   usePolishStore,
@@ -16,7 +15,6 @@ interface PolishPopupProps {
 }
 
 export function PolishPopup({ sourceText, onClose }: PolishPopupProps) {
-  const popupRef = useRef<HTMLDivElement>(null);
   const { polish, isLoading, error, result } = usePolish();
 
   // Get last used settings from store
@@ -36,34 +34,17 @@ export function PolishPopup({ sourceText, onClose }: PolishPopupProps) {
     }
   }, [sourceText, lastContext, lastChannel, lastOptions, polish]);
 
-  // Handle ESC key to close
+  // Handle ESC or Backspace key to close
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" || e.key === "Backspace") {
+        e.preventDefault();
         onClose();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
-  // Handle click outside to close
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    };
-
-    const timeout = setTimeout(() => {
-      document.addEventListener("mousedown", handleClickOutside);
-    }, 100);
-
-    return () => {
-      clearTimeout(timeout);
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
   }, [onClose]);
 
   const handleCopy = useCallback(async () => {
@@ -120,141 +101,92 @@ export function PolishPopup({ sourceText, onClose }: PolishPopupProps) {
   };
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center p-4 bg-black/20">
-      <div
-        ref={popupRef}
-        className="w-full max-w-4xl bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-          <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200 flex items-center gap-2">
-            <span>✏️</span>
-            <span>글 다듬기</span>
-          </h2>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-200 dark:hover:text-gray-300 dark:hover:bg-gray-700 transition-colors"
-          >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
-          </button>
+    <div className="flex flex-col h-full w-full">
+      {/* Header - DrawerPanel과 동일한 스타일 */}
+      <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-200/50">
+        {/* Back button */}
+        <button
+          onClick={onClose}
+          className="p-1 rounded-lg hover:bg-gray-200/80 transition-colors"
+          title="뒤로"
+        >
+          <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+
+        {/* Title */}
+        <div className="flex items-center gap-2">
+          <svg className="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+            />
+          </svg>
+          <span className="font-medium text-gray-800">글 다듬기</span>
         </div>
 
-        {/* Content */}
-        <div className="p-4 space-y-4">
-          {/* Source Text */}
-          <div>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                📝 원문 (러프한 초안)
-              </span>
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Keyboard hint */}
+        <div className="hidden sm:flex items-center gap-1 text-[10px] text-gray-400">
+          <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">⌫</span>
+          <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">ESC</span>
+        </div>
+
+        {/* Close button */}
+        <button
+          onClick={onClose}
+          className="p-1.5 rounded-lg hover:bg-gray-200/80 transition-colors"
+          title="닫기 (ESC)"
+        >
+          <svg
+            className="w-4 h-4 text-gray-500"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Content - 상단: 원문/결과 좌우, 하단: 설정 */}
+      <div className="flex-1 overflow-hidden p-4 flex flex-col gap-3">
+        {/* Top: Source & Result 좌우 배치 */}
+        <div className="flex-1 flex gap-4 min-h-0">
+          {/* Source Text - 노란색 포스트잇 */}
+          <div className="flex-1 flex flex-col min-w-0">
+            <div className="flex items-center gap-2 mb-2 px-1">
+              <span className="text-xs font-medium text-amber-700">📝 원문 (러프한 초안)</span>
             </div>
-            <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 max-h-32 overflow-y-auto">
-              <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+            <div className="flex-1 p-3 bg-yellow-100 border-2 border-yellow-300 rounded-lg shadow-md overflow-y-auto">
+              <p className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
                 {sourceText}
               </p>
             </div>
           </div>
 
-          {/* Settings */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400">
-              ⚙️ 설정
-            </div>
-
-            {/* Context & Channel Dropdowns */}
-            <div className="flex gap-3">
-              {/* Context Select */}
-              <div className="flex-1">
-                <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
-                  상황
-                </label>
-                <select
-                  value={lastContext}
-                  onChange={(e) =>
-                    handleContextChange(e.target.value as PolishContext)
-                  }
-                  className="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:text-gray-200"
-                >
-                  {POLISH_CONTEXTS.map((ctx) => (
-                    <option key={ctx.id} value={ctx.id}>
-                      {ctx.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Channel Select */}
-              <div className="flex-1">
-                <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
-                  채널
-                </label>
-                <select
-                  value={lastChannel}
-                  onChange={(e) =>
-                    handleChannelChange(e.target.value as PolishChannel)
-                  }
-                  className="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:text-gray-200"
-                >
-                  {POLISH_CHANNELS.map((ch) => (
-                    <option key={ch.id} value={ch.id}>
-                      {ch.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Options */}
-            <div className="flex flex-wrap gap-2">
-              {POLISH_OPTIONS.map((opt) => (
-                <label
-                  key={opt.id}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full cursor-pointer transition-colors ${
-                    lastOptions.includes(opt.id)
-                      ? "bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700"
-                      : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 hover:bg-gray-200 dark:hover:bg-gray-700"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={lastOptions.includes(opt.id)}
-                    onChange={() => handleOptionToggle(opt.id)}
-                    className="sr-only"
-                  />
-                  <span>{opt.name}</span>
-                </label>
-              ))}
-            </div>
+          {/* Arrow */}
+          <div className="flex items-center justify-center px-2 text-gray-400">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+            </svg>
           </div>
 
-          {/* Polished Result */}
-          <div>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                ✨ 정돈된 결과
-              </span>
+          {/* Result - 녹색 포스트잇 */}
+          <div className="flex-1 flex flex-col min-w-0">
+            <div className="flex items-center gap-2 mb-2 px-1">
+              <span className="text-xs font-medium text-green-700">✨ 정돈된 결과</span>
             </div>
-            <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 min-h-[100px] max-h-48 overflow-y-auto">
+            <div className="flex-1 p-3 bg-green-100 border-2 border-green-300 rounded-lg shadow-md overflow-y-auto">
               {isLoading ? (
-                <div className="flex items-center justify-center h-20">
-                  <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-                    <svg
-                      className="animate-spin h-4 w-4"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
+                <div className="flex items-center justify-center h-full">
+                  <div className="flex items-center gap-2 text-sm text-green-600">
+                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
                       <circle
                         className="opacity-25"
                         cx="12"
@@ -273,11 +205,9 @@ export function PolishPopup({ sourceText, onClose }: PolishPopupProps) {
                   </div>
                 </div>
               ) : error ? (
-                <div className="text-sm text-red-600 dark:text-red-400">
-                  {error}
-                </div>
+                <p className="text-sm text-red-600">{error}</p>
               ) : result?.polishedText ? (
-                <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                <p className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
                   {result.polishedText}
                 </p>
               ) : null}
@@ -285,33 +215,95 @@ export function PolishPopup({ sourceText, onClose }: PolishPopupProps) {
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center justify-end gap-2 px-4 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleRepolish}
-            disabled={isLoading}
-          >
-            다시 다듬기
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleCopy}
-            disabled={isLoading || !result?.polishedText}
-          >
-            복사
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleReplace}
-            disabled={isLoading || !result?.polishedText}
-          >
-            바꾸기
-          </Button>
+        {/* Bottom: Settings - 가로로 길게 */}
+        <div className="flex-shrink-0 p-3 bg-gray-100 border-2 border-gray-300 rounded-lg shadow-md">
+          <div className="flex items-center gap-4">
+            {/* Settings label */}
+            <span className="text-xs font-medium text-gray-600 flex-shrink-0">⚙️ 설정</span>
+
+            {/* Context Select */}
+            <div className="flex items-center gap-1.5">
+              <label className="text-[10px] text-gray-500">상황</label>
+              <select
+                value={lastContext}
+                onChange={(e) => handleContextChange(e.target.value as PolishContext)}
+                className="px-2 py-1 text-xs bg-white border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+              >
+                {POLISH_CONTEXTS.map((ctx) => (
+                  <option key={ctx.id} value={ctx.id}>
+                    {ctx.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Channel Select */}
+            <div className="flex items-center gap-1.5">
+              <label className="text-[10px] text-gray-500">채널</label>
+              <select
+                value={lastChannel}
+                onChange={(e) => handleChannelChange(e.target.value as PolishChannel)}
+                className="px-2 py-1 text-xs bg-white border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+              >
+                {POLISH_CHANNELS.map((ch) => (
+                  <option key={ch.id} value={ch.id}>
+                    {ch.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Divider */}
+            <div className="w-px h-5 bg-gray-300" />
+
+            {/* Options */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {POLISH_OPTIONS.map((opt) => (
+                <label
+                  key={opt.id}
+                  className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded-full cursor-pointer transition-colors ${
+                    lastOptions.includes(opt.id)
+                      ? "bg-purple-100 text-purple-700 border border-purple-300"
+                      : "bg-white text-gray-600 border border-gray-300 hover:bg-gray-50"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={lastOptions.includes(opt.id)}
+                    onChange={() => handleOptionToggle(opt.id)}
+                    className="sr-only"
+                  />
+                  <span>{opt.name}</span>
+                </label>
+              ))}
+            </div>
+          </div>
         </div>
+      </div>
+
+      {/* Footer - 액션 버튼 */}
+      <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-200/50">
+        <button
+          onClick={handleRepolish}
+          disabled={isLoading}
+          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          다시 다듬기
+        </button>
+        <button
+          onClick={handleCopy}
+          disabled={isLoading || !result?.polishedText}
+          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          복사
+        </button>
+        <button
+          onClick={handleReplace}
+          disabled={isLoading || !result?.polishedText}
+          className="px-4 py-2 text-sm font-medium text-white bg-purple-500 rounded-lg hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          바꾸기
+        </button>
       </div>
     </div>
   );

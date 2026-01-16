@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useSettingsStore } from "@/store";
 import { ApiKeyInput } from "./ApiKeyInput";
-import type { ClaudeModel, PopupPosition, PermissionStatus } from "@/types";
+import type { ClaudeModel, PermissionStatus } from "@/types";
 
 export function SettingsPanel() {
   const {
@@ -35,10 +35,6 @@ export function SettingsPanel() {
     updateSettings({ preferredModel: model });
   };
 
-  const handlePopupPositionChange = (position: PopupPosition) => {
-    updateSettings({ popupPosition: position });
-  };
-
   const handleMaxHistoryChange = (value: number) => {
     updateSettings({ maxHistoryCount: value });
   };
@@ -62,7 +58,6 @@ export function SettingsPanel() {
   const handleRequestAccessibility = async () => {
     try {
       await invoke("request_accessibility_permission");
-      // Re-check after a short delay
       setTimeout(checkAccessibilityStatus, 1000);
     } catch (err) {
       console.error("Failed to request accessibility:", err);
@@ -78,236 +73,266 @@ export function SettingsPanel() {
   }
 
   return (
-    <div className="p-4 space-y-6 overflow-y-auto h-full">
-      {/* API Key Section */}
-      <section>
-        <ApiKeyInput hasApiKey={apiKeyStatus?.exists ?? false} />
-      </section>
+    <div className="h-full overflow-y-auto p-4">
+      {/* 2열 그리드 레이아웃 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* API 키 카드 - 노란색 */}
+        <SettingsCard
+          icon="🔑"
+          title="API 키"
+          color="yellow"
+        >
+          <ApiKeyInput hasApiKey={apiKeyStatus?.exists ?? false} />
+        </SettingsCard>
 
-      <hr className="border-gray-200 dark:border-gray-700" />
+        {/* 번역 설정 카드 - 파란색 */}
+        <SettingsCard
+          icon="🤖"
+          title="번역 설정"
+          color="blue"
+        >
+          {/* Model Selection */}
+          <div className="space-y-2">
+            <label className="block text-xs font-medium text-blue-700">
+              Claude 모델
+            </label>
+            <select
+              value={settings.preferredModel}
+              onChange={(e) => handleModelChange(e.target.value as ClaudeModel)}
+              className="w-full px-2 py-1.5 text-sm bg-white border border-blue-300 rounded-md focus:ring-2 focus:ring-blue-500"
+              disabled={isLoading}
+            >
+              <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (가장 빠름)</option>
+              <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5 (균형)</option>
+              <option value="claude-opus-4-5-20251101">Claude Opus 4.5 (최고 품질)</option>
+            </select>
+          </div>
 
-      {/* Translation Settings */}
-      <section className="space-y-4">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-          Translation
-        </h3>
-
-        {/* Model Selection */}
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-            Claude Model
-          </label>
-          <select
-            value={settings.preferredModel}
-            onChange={(e) => handleModelChange(e.target.value as ClaudeModel)}
-            className="w-full px-3 py-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 text-sm"
-            disabled={isLoading}
-          >
-            <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (Fastest)</option>
-            <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5 (Balanced)</option>
-            <option value="claude-opus-4-5-20251101">Claude Opus 4.5 (Best)</option>
-          </select>
-        </div>
-
-        {/* Auto Detect Language */}
-        <div className="flex items-center justify-between">
-          <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-            Auto-detect language
-          </label>
-          <button
-            onClick={() => handleAutoDetectChange(!settings.autoDetectLanguage)}
-            className={`relative w-11 h-6 rounded-full transition-colors ${
-              settings.autoDetectLanguage ? "bg-blue-500" : "bg-gray-300 dark:bg-gray-600"
-            }`}
-            disabled={isLoading}
-          >
-            <span
-              className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                settings.autoDetectLanguage ? "translate-x-5" : ""
-              }`}
+          {/* Auto Detect Language */}
+          <div className="flex items-center justify-between mt-3">
+            <label className="text-xs font-medium text-blue-700">
+              언어 자동 감지
+            </label>
+            <ToggleSwitch
+              enabled={settings.autoDetectLanguage}
+              onChange={handleAutoDetectChange}
+              disabled={isLoading}
+              color="blue"
             />
-          </button>
-        </div>
-      </section>
+          </div>
+        </SettingsCard>
 
-      <hr className="border-gray-200 dark:border-gray-700" />
-
-      {/* Shortcut Settings */}
-      <section className="space-y-4">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-          Keyboard Shortcut
-        </h3>
-
-        {/* Double Press Interval */}
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-            Double-press interval: {settings.doublePressInterval}ms
-          </label>
-          <input
-            type="range"
-            min="200"
-            max="1000"
-            step="50"
-            value={settings.doublePressInterval}
-            onChange={(e) => handleDoublePressIntervalChange(Number(e.target.value))}
-            className="w-full"
-            disabled={isLoading}
-          />
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Time window for Cmd+C+C detection
-          </p>
-        </div>
-      </section>
-
-      <hr className="border-gray-200 dark:border-gray-700" />
-
-      {/* UI Settings */}
-      <section className="space-y-4">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-          Appearance
-        </h3>
-
-        {/* Popup Position */}
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-            Popup Position
-          </label>
-          <select
-            value={settings.popupPosition}
-            onChange={(e) => handlePopupPositionChange(e.target.value as PopupPosition)}
-            className="w-full px-3 py-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 text-sm"
-            disabled={isLoading}
-          >
-            <option value="cursor">At cursor</option>
-            <option value="center">Screen center</option>
-            <option value="top-right">Top right</option>
-          </select>
-        </div>
-      </section>
-
-      <hr className="border-gray-200 dark:border-gray-700" />
-
-      {/* Clipboard Settings */}
-      <section className="space-y-4">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-          Clipboard History
-        </h3>
-
-        {/* Max History Count */}
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-            Maximum items: {settings.maxHistoryCount}
-          </label>
-          <input
-            type="range"
-            min="10"
-            max="200"
-            step="10"
-            value={settings.maxHistoryCount}
-            onChange={(e) => handleMaxHistoryChange(Number(e.target.value))}
-            className="w-full"
-            disabled={isLoading}
-          />
-        </div>
-      </section>
-
-      <hr className="border-gray-200 dark:border-gray-700" />
-
-      {/* Replace & Paste Settings */}
-      <section className="space-y-4">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-          Replace & Paste
-        </h3>
-
-        {/* Paste Delay */}
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-            Paste delay: {settings.pasteDelayMs}ms
-          </label>
-          <input
-            type="range"
-            min="50"
-            max="500"
-            step="25"
-            value={settings.pasteDelayMs}
-            onChange={(e) => handlePasteDelayChange(Number(e.target.value))}
-            className="w-full"
-            disabled={isLoading}
-          />
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Delay between switching to previous app and pasting. Increase if paste fails.
-          </p>
-        </div>
-      </section>
-
-      <hr className="border-gray-200 dark:border-gray-700" />
-
-      {/* System Settings */}
-      <section className="space-y-4">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-          System
-        </h3>
-
-        {/* Launch at Login */}
-        <div className="flex items-center justify-between">
-          <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-            Launch at login
-          </label>
-          <button
-            onClick={() => handleLaunchAtLoginChange(!settings.launchAtLogin)}
-            className={`relative w-11 h-6 rounded-full transition-colors ${
-              settings.launchAtLogin ? "bg-blue-500" : "bg-gray-300 dark:bg-gray-600"
-            }`}
-            disabled={isLoading}
-          >
-            <span
-              className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                settings.launchAtLogin ? "translate-x-5" : ""
-              }`}
+        {/* 단축키 카드 - 녹색 */}
+        <SettingsCard
+          icon="⌨️"
+          title="단축키"
+          color="green"
+        >
+          <div className="space-y-2">
+            <label className="block text-xs font-medium text-green-700">
+              더블 프레스 인터벌: {settings.doublePressInterval}ms
+            </label>
+            <input
+              type="range"
+              min="200"
+              max="1000"
+              step="50"
+              value={settings.doublePressInterval}
+              onChange={(e) => handleDoublePressIntervalChange(Number(e.target.value))}
+              className="w-full accent-green-500"
+              disabled={isLoading}
             />
-          </button>
-        </div>
+            <p className="text-[10px] text-green-600">
+              ⌘C⌘C 감지 시간 간격
+            </p>
+          </div>
+        </SettingsCard>
 
-        {/* Accessibility Permission */}
-        <div className="space-y-2">
+        {/* 클립보드 카드 - 주황색 */}
+        <SettingsCard
+          icon="📋"
+          title="클립보드"
+          color="orange"
+        >
+          <div className="space-y-2">
+            <label className="block text-xs font-medium text-orange-700">
+              최대 저장 항목: {settings.maxHistoryCount}개
+            </label>
+            <input
+              type="range"
+              min="10"
+              max="200"
+              step="10"
+              value={settings.maxHistoryCount}
+              onChange={(e) => handleMaxHistoryChange(Number(e.target.value))}
+              className="w-full accent-orange-500"
+              disabled={isLoading}
+            />
+          </div>
+        </SettingsCard>
+
+        {/* 화면 표시 카드 - 핑크색 */}
+        <SettingsCard
+          icon="🎨"
+          title="화면 표시"
+          color="pink"
+        >
+          {/* Paste Delay */}
+          <div className="space-y-2">
+            <label className="block text-xs font-medium text-pink-700">
+              붙여넣기 딜레이: {settings.pasteDelayMs}ms
+            </label>
+            <input
+              type="range"
+              min="50"
+              max="500"
+              step="25"
+              value={settings.pasteDelayMs}
+              onChange={(e) => handlePasteDelayChange(Number(e.target.value))}
+              className="w-full accent-pink-500"
+              disabled={isLoading}
+            />
+            <p className="text-[10px] text-pink-600">
+              붙여넣기 실패 시 값을 높여보세요
+            </p>
+          </div>
+        </SettingsCard>
+
+        {/* 시스템 카드 - 회색 */}
+        <SettingsCard
+          icon="⚙️"
+          title="시스템"
+          color="gray"
+        >
+          {/* Launch at Login */}
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Accessibility Permission
-              </span>
-              {accessibilityGranted === true && (
-                <span className="px-2 py-0.5 text-xs font-medium text-green-700 bg-green-100 dark:text-green-300 dark:bg-green-900/30 rounded-full">
-                  Granted
+            <label className="text-xs font-medium text-gray-700">
+              로그인 시 시작
+            </label>
+            <ToggleSwitch
+              enabled={settings.launchAtLogin}
+              onChange={handleLaunchAtLoginChange}
+              disabled={isLoading}
+              color="gray"
+            />
+          </div>
+
+          {/* Accessibility Permission */}
+          <div className="mt-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-gray-700">
+                  접근성 권한
                 </span>
-              )}
+                {accessibilityGranted === true && (
+                  <span className="px-1.5 py-0.5 text-[10px] font-medium text-green-700 bg-green-100 rounded-full">
+                    허용됨
+                  </span>
+                )}
+                {accessibilityGranted === false && (
+                  <span className="px-1.5 py-0.5 text-[10px] font-medium text-red-700 bg-red-100 rounded-full">
+                    필요
+                  </span>
+                )}
+              </div>
               {accessibilityGranted === false && (
-                <span className="px-2 py-0.5 text-xs font-medium text-red-700 bg-red-100 dark:text-red-300 dark:bg-red-900/30 rounded-full">
-                  Not Granted
-                </span>
+                <button
+                  onClick={handleRequestAccessibility}
+                  className="px-2 py-1 text-[10px] font-medium text-white bg-blue-500 hover:bg-blue-600 rounded transition-colors"
+                >
+                  허용
+                </button>
+              )}
+              {accessibilityGranted === true && (
+                <button
+                  onClick={checkAccessibilityStatus}
+                  className="px-2 py-1 text-[10px] text-gray-600 hover:bg-gray-200 rounded transition-colors"
+                >
+                  새로고침
+                </button>
               )}
             </div>
-            {accessibilityGranted === false && (
-              <button
-                onClick={handleRequestAccessibility}
-                className="px-3 py-1 text-xs font-medium text-white bg-blue-500 hover:bg-blue-600 rounded-lg transition-colors"
-              >
-                Grant
-              </button>
-            )}
-            {accessibilityGranted === true && (
-              <button
-                onClick={checkAccessibilityStatus}
-                className="px-3 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-              >
-                Refresh
-              </button>
-            )}
+            <p className="text-[10px] text-gray-500">
+              ⌘C⌘C 감지에 필요합니다
+            </p>
           </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Required for Cmd+C+C detection. Grant permission in System Settings &gt; Privacy &amp; Security &gt; Accessibility
-          </p>
-        </div>
-      </section>
+        </SettingsCard>
+      </div>
     </div>
+  );
+}
+
+// 설정 카드 컴포넌트
+interface SettingsCardProps {
+  icon: string;
+  title: string;
+  color: "yellow" | "blue" | "green" | "orange" | "pink" | "gray";
+  children: React.ReactNode;
+}
+
+const colorClasses = {
+  yellow: "bg-yellow-100 border-yellow-300",
+  blue: "bg-blue-100 border-blue-300",
+  green: "bg-green-100 border-green-300",
+  orange: "bg-orange-100 border-orange-300",
+  pink: "bg-pink-100 border-pink-300",
+  gray: "bg-gray-100 border-gray-300",
+};
+
+const titleColors = {
+  yellow: "text-yellow-800",
+  blue: "text-blue-800",
+  green: "text-green-800",
+  orange: "text-orange-800",
+  pink: "text-pink-800",
+  gray: "text-gray-800",
+};
+
+function SettingsCard({ icon, title, color, children }: SettingsCardProps) {
+  return (
+    <div className={`p-4 rounded-lg border-2 shadow-md ${colorClasses[color]}`}>
+      <div className={`flex items-center gap-2 mb-3 font-semibold text-sm ${titleColors[color]}`}>
+        <span>{icon}</span>
+        <span>{title}</span>
+      </div>
+      <div className="space-y-2">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// 토글 스위치 컴포넌트
+interface ToggleSwitchProps {
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+  disabled?: boolean;
+  color: "yellow" | "blue" | "green" | "orange" | "pink" | "gray";
+}
+
+const toggleColors = {
+  yellow: "bg-yellow-500",
+  blue: "bg-blue-500",
+  green: "bg-green-500",
+  orange: "bg-orange-500",
+  pink: "bg-pink-500",
+  gray: "bg-gray-500",
+};
+
+function ToggleSwitch({ enabled, onChange, disabled, color }: ToggleSwitchProps) {
+  return (
+    <button
+      onClick={() => onChange(!enabled)}
+      className={`relative w-9 h-5 rounded-full transition-colors ${
+        enabled ? toggleColors[color] : "bg-gray-300"
+      }`}
+      disabled={disabled}
+    >
+      <span
+        className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+          enabled ? "translate-x-4" : ""
+        }`}
+      />
+    </button>
   );
 }

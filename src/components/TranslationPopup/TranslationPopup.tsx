@@ -1,8 +1,5 @@
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Button } from "@/components/common";
-import { SourceText } from "./SourceText";
-import { TranslatedText } from "./TranslatedText";
 import { useTranslation } from "@/hooks/useTranslation";
 
 interface TranslationPopupProps {
@@ -14,7 +11,6 @@ export function TranslationPopup({
   sourceText,
   onClose,
 }: TranslationPopupProps) {
-  const popupRef = useRef<HTMLDivElement>(null);
   const { translate, isLoading, error, result } = useTranslation();
 
   // Translate on mount
@@ -24,35 +20,17 @@ export function TranslationPopup({
     }
   }, [sourceText, translate]);
 
-  // Handle ESC key to close
+  // Handle ESC or Backspace key to close
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" || e.key === "Backspace") {
+        e.preventDefault();
         onClose();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
-  // Handle click outside to close
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    };
-
-    // Delay adding listener to prevent immediate close
-    const timeout = setTimeout(() => {
-      document.addEventListener("mousedown", handleClickOutside);
-    }, 100);
-
-    return () => {
-      clearTimeout(timeout);
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
   }, [onClose]);
 
   const handleCopy = useCallback(async () => {
@@ -88,100 +66,161 @@ export function TranslationPopup({
 
   const detectedLanguage = result?.detectedLanguage ?? "en";
   const targetLanguage = detectedLanguage === "ko" ? "en" : "ko";
+  const sourceLabel = detectedLanguage === "ko" ? "한국어" : "English";
+  const targetLabel = targetLanguage === "ko" ? "한국어" : "English";
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center p-4 bg-black/20">
-      <div
-        ref={popupRef}
-        className="w-full max-w-4xl bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-          <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-            TransClip
-          </h2>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-200 dark:hover:text-gray-300 dark:hover:bg-gray-700 transition-colors"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
-          </button>
+    <div className="flex flex-col h-full w-full">
+      {/* Header - DrawerPanel과 동일한 스타일 */}
+      <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-200/50">
+        {/* Back button */}
+        <button
+          onClick={onClose}
+          className="p-1 rounded-lg hover:bg-gray-200/80 transition-colors"
+          title="뒤로"
+        >
+          <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+
+        {/* Title */}
+        <div className="flex items-center gap-2">
+          <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"
+            />
+          </svg>
+          <span className="font-medium text-gray-800">번역</span>
         </div>
 
-        {/* Content - Side by Side Layout */}
-        <div className="p-4">
-          <div className="flex gap-4 items-stretch">
-            {/* Source Text */}
-            <div className="flex-1 min-w-0">
-              <SourceText text={sourceText} language={detectedLanguage} />
-            </div>
+        {/* Spacer */}
+        <div className="flex-1" />
 
-            {/* Arrow Separator */}
-            <div className="flex items-center justify-center px-2">
-              <svg
-                className="w-5 h-5 text-gray-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M14 5l7 7m0 0l-7 7m7-7H3"
-                />
+        {/* Footer info */}
+        <div className="flex items-center gap-3 text-xs text-gray-500">
+          {result?.glossaryApplied && result.glossaryApplied.length > 0 && (
+            <span className="flex items-center gap-1">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
               </svg>
-            </div>
+              용어집 {result.glossaryApplied.length}개 적용
+            </span>
+          )}
+          {result?.fromCache && (
+            <span className="text-green-600">캐시</span>
+          )}
+        </div>
 
-            {/* Translated Text */}
-            <div className="flex-1 min-w-0">
-              <TranslatedText
-                text={result?.translatedText ?? ""}
-                language={targetLanguage}
-                isLoading={isLoading}
-                error={error ?? undefined}
-              />
+        {/* Keyboard hint */}
+        <div className="hidden sm:flex items-center gap-1 text-[10px] text-gray-400">
+          <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">⌫</span>
+          <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">ESC</span>
+        </div>
+
+        {/* Close button */}
+        <button
+          onClick={onClose}
+          className="p-1.5 rounded-lg hover:bg-gray-200/80 transition-colors"
+          title="닫기 (ESC)"
+        >
+          <svg
+            className="w-4 h-4 text-gray-500"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Content - 포스트잇 스타일 카드 */}
+      <div className="flex-1 overflow-hidden p-4">
+        <div className="h-full flex gap-4">
+          {/* Source Text - 노란색 포스트잇 */}
+          <div className="flex-1 flex flex-col min-w-0">
+            <div className="flex items-center gap-2 mb-2 px-1">
+              <span className="text-xs font-medium text-amber-700">📝 원문</span>
+              <span className="text-[10px] text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">
+                {sourceLabel}
+              </span>
+            </div>
+            <div className="flex-1 p-4 bg-yellow-100 border-2 border-yellow-300 rounded-lg shadow-md overflow-y-auto">
+              <p className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
+                {sourceText}
+              </p>
             </div>
           </div>
 
-          {/* Footer info */}
-          <div className="flex items-center gap-4 mt-3 text-xs text-gray-500 dark:text-gray-400">
-            {/* Glossary info */}
-            {result?.glossaryApplied && result.glossaryApplied.length > 0 && (
-              <span>{result.glossaryApplied.length} glossary term(s) applied</span>
-            )}
+          {/* Arrow */}
+          <div className="flex items-center justify-center px-2 text-gray-400">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+            </svg>
+          </div>
 
-            {/* Cache indicator */}
-            {result?.fromCache && <span>From cache</span>}
+          {/* Translated Text - 파란색 포스트잇 */}
+          <div className="flex-1 flex flex-col min-w-0">
+            <div className="flex items-center gap-2 mb-2 px-1">
+              <span className="text-xs font-medium text-blue-700">✨ 번역 결과</span>
+              <span className="text-[10px] text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded">
+                {targetLabel}
+              </span>
+            </div>
+            <div className="flex-1 p-4 bg-blue-100 border-2 border-blue-300 rounded-lg shadow-md overflow-y-auto">
+              {isLoading ? (
+                <div className="flex items-center justify-center h-full">
+                  <div className="flex items-center gap-2 text-sm text-blue-600">
+                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      />
+                    </svg>
+                    <span>번역 중...</span>
+                  </div>
+                </div>
+              ) : error ? (
+                <p className="text-sm text-red-600">{error}</p>
+              ) : (
+                <p className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
+                  {result?.translatedText}
+                </p>
+              )}
+            </div>
           </div>
         </div>
+      </div>
 
-        {/* Actions */}
-        <div className="flex items-center justify-end gap-2 px-4 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleCopy}
-            disabled={isLoading || !result?.translatedText}
-          >
-            Copy
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleReplace}
-            disabled={isLoading || !result?.translatedText}
-          >
-            Replace
-          </Button>
-        </div>
+      {/* Footer - 액션 버튼 */}
+      <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-200/50">
+        <button
+          onClick={handleCopy}
+          disabled={isLoading || !result?.translatedText}
+          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          복사
+        </button>
+        <button
+          onClick={handleReplace}
+          disabled={isLoading || !result?.translatedText}
+          className="px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          바꾸기
+        </button>
       </div>
     </div>
   );

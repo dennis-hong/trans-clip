@@ -9,6 +9,8 @@ interface PostItCardProps {
   onPaste?: (item: ClipboardItem) => void;
   onDelete: (id: string) => void;
   onTogglePin: (id: string) => void;
+  onTranslate?: (item: ClipboardItem) => void;
+  onPolish?: (item: ClipboardItem) => void;
   showPasteButton?: boolean;
 }
 
@@ -30,7 +32,7 @@ function getColorFromId(id: string): string {
   return COLORS[colorIndex] || "bg-yellow-100 border-yellow-300";
 }
 
-export function PostItCard({ item, index, color, onCopy, onPaste, onDelete, onTogglePin, showPasteButton }: PostItCardProps) {
+export function PostItCard({ item, index, color, onCopy, onPaste, onDelete, onTogglePin, onTranslate, onPolish, showPasteButton }: PostItCardProps) {
   const [isHovered, setIsHovered] = useState(false);
   const cardColor = color || getColorFromId(item.id);
 
@@ -64,6 +66,26 @@ export function PostItCard({ item, index, color, onCopy, onPaste, onDelete, onTo
     [item.id, onTogglePin]
   );
 
+  const handleTranslate = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (onTranslate) {
+        onTranslate(item);
+      }
+    },
+    [item, onTranslate]
+  );
+
+  const handlePolish = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (onPolish) {
+        onPolish(item);
+      }
+    },
+    [item, onPolish]
+  );
+
   const formatTime = (dateStr: string) => {
     const date = new Date(dateStr);
     const now = new Date();
@@ -91,7 +113,7 @@ export function PostItCard({ item, index, color, onCopy, onPaste, onDelete, onTo
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       className={`
-        relative flex-shrink-0 w-48 h-40 p-3 rounded-lg border-2 cursor-pointer
+        relative flex-shrink-0 w-48 h-48 p-3 rounded-lg border-2 cursor-pointer
         transition-all duration-200 ease-out
         ${cardColor}
         ${isHovered ? "scale-105 shadow-lg -translate-y-1" : "shadow-md"}
@@ -123,7 +145,7 @@ export function PostItCard({ item, index, color, onCopy, onPaste, onDelete, onTo
       </div>
 
       {/* Content preview */}
-      <div className="text-xs text-gray-600 overflow-hidden line-clamp-4 leading-relaxed">
+      <div className="text-xs text-gray-600 overflow-hidden line-clamp-5 leading-relaxed">
         {item.contentPreview}
       </div>
 
@@ -136,10 +158,44 @@ export function PostItCard({ item, index, color, onCopy, onPaste, onDelete, onTo
 
         {/* Action buttons - visible on hover */}
         <div
-          className={`flex gap-1 transition-opacity duration-150 ${
+          className={`flex gap-0.5 transition-opacity duration-150 ${
             isHovered ? "opacity-100" : "opacity-0"
           }`}
         >
+          {/* Translate button */}
+          {onTranslate && (
+            <button
+              onClick={handleTranslate}
+              className="p-1 rounded hover:bg-black/10 transition-colors"
+              title="번역"
+            >
+              <svg className="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"
+                />
+              </svg>
+            </button>
+          )}
+          {/* Polish button */}
+          {onPolish && (
+            <button
+              onClick={handlePolish}
+              className="p-1 rounded hover:bg-black/10 transition-colors"
+              title="다듬기"
+            >
+              <svg className="w-3.5 h-3.5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                />
+              </svg>
+            </button>
+          )}
           {/* Paste button - only shown in stealth mode */}
           {showPasteButton && onPaste && (
             <button

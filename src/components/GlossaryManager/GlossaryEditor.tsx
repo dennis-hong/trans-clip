@@ -1,5 +1,4 @@
 import { useState, useCallback } from "react";
-import { Button } from "@/components/common";
 import type { GlossaryEntry } from "@/types";
 
 interface GlossaryEditorProps {
@@ -28,12 +27,12 @@ export function GlossaryEditor({
       setError(null);
 
       if (!keyword.trim()) {
-        setError("Keyword is required");
+        setError("용어를 입력해주세요");
         return;
       }
 
       if (!description.trim()) {
-        setError("Description is required");
+        setError("설명을 입력해주세요");
         return;
       }
 
@@ -43,70 +42,75 @@ export function GlossaryEditor({
           description: description.trim(),
         });
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to save entry");
+        setError(err instanceof Error ? err.message : "저장에 실패했습니다");
       }
     },
     [keyword, description, onSave]
   );
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-        {entry ? "Edit Entry" : "Add New Entry"}
-      </h3>
-
+    <form onSubmit={handleSubmit} className="space-y-3">
       {error && (
-        <div className="p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+        <div className="p-2 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-xs text-red-600">{error}</p>
         </div>
       )}
 
       {/* Keyword */}
-      <div className="space-y-2">
-        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-          Keyword
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-gray-700">
+          용어
         </label>
         <input
           type="text"
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
-          placeholder="e.g., RFC, Lunit, API"
+          placeholder="예: RFC, Lunit, API"
           maxLength={100}
-          className="w-full px-3 py-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+          className="w-full px-3 py-2 bg-purple-50 rounded-lg border-2 border-purple-200 text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-400 outline-none"
           disabled={isLoading}
+          autoFocus
         />
-        <p className="text-xs text-gray-400 dark:text-gray-500">
-          The term that should be handled specially during translation
-        </p>
       </div>
 
       {/* Description */}
-      <div className="space-y-2">
-        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-          Description
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-gray-700">
+          설명 <span className="font-normal text-gray-400">(번역 시 참고)</span>
         </label>
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="Describe how this keyword should be translated or handled. e.g., 'Company name, keep as Lunit in English or 루닛 in Korean'"
-          rows={4}
+          placeholder="예: 회사명, 영어는 Lunit, 한국어는 루닛"
+          rows={3}
           maxLength={500}
-          className="w-full px-3 py-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none"
+          className="w-full px-3 py-2 bg-purple-50 rounded-lg border-2 border-purple-200 text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-400 outline-none resize-none"
           disabled={isLoading}
         />
-        <p className="text-xs text-gray-400 dark:text-gray-500">
-          Provide context for the AI to use when translating this term
-        </p>
       </div>
 
       {/* Actions */}
-      <div className="flex items-center justify-end gap-2 pt-2">
-        <Button variant="ghost" size="sm" type="button" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button variant="primary" size="sm" type="submit" loading={isLoading}>
-          {entry ? "Update" : "Add"}
-        </Button>
+      <div className="flex items-center justify-end gap-2 pt-1">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+        >
+          취소
+        </button>
+        <button
+          type="submit"
+          disabled={isLoading}
+          className="px-3 py-1.5 text-sm font-medium text-white bg-purple-500 hover:bg-purple-600 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+        >
+          {isLoading && (
+            <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+          )}
+          {entry ? "수정" : "추가"}
+        </button>
       </div>
     </form>
   );

@@ -149,6 +149,19 @@ impl Database {
             .execute(&self.pool)
             .await;
 
+        // Create monitor_window_sizes table for per-monitor adaptive window sizing
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS monitor_window_sizes (
+                monitor_key TEXT PRIMARY KEY,
+                window_width INTEGER NOT NULL,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
     }
 
@@ -680,6 +693,41 @@ impl Database {
     pub fn validate_api_key_format(api_key: &str) -> bool {
         // Claude API keys typically start with "sk-ant-" and have a specific length
         api_key.starts_with("sk-ant-") && api_key.len() > 20
+    }
+
+    // ============================================
+    // Monitor Window Size Operations
+    // ============================================
+
+    /// Get saved window width for a specific monitor
+    pub async fn get_monitor_window_width(&self, monitor_key: &str) -> Result<Option<i32>, sqlx::Error> {
+        let row: Option<(i32,)> = sqlx::query_as(
+            "SELECT window_width FROM monitor_window_sizes WHERE monitor_key = ?"
+        )
+        .bind(monitor_key)
+        .fetch_optional(&self.pool)
+        .await?;
+        
+        Ok(row.map(|(width,)| width))
+    }
+
+    /// Save window width for a specific monitor
+    pub async fn save_monitor_window_width(&self, monitor_key: &str, width: i32) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO monitor_window_sizes (monitor_key, window_width, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(monitor_key) DO UPDATE SET
+                window_width = excluded.window_width,
+                updated_at = CURRENT_TIMESTAMP
+            "#,
+        )
+        .bind(monitor_key)
+        .bind(width)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
     }
 }
 

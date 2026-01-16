@@ -1418,9 +1418,37 @@ pub async fn set_window_size(
     Ok(())
 }
 
+/// Generate a unique key for a monitor based on its resolution
+fn generate_monitor_key(width: u32, height: u32, scale_factor: f64) -> String {
+    format!("{}x{}@{:.2}", width, height, scale_factor)
+}
+
+/// Calculate adaptive window width based on monitor width
+/// Returns a width that works well for the monitor size
+fn calculate_adaptive_width(monitor_logical_width: i32) -> i32 {
+    // For ultra-wide monitors (>= 2560 logical), use ~60% of width, max 1600
+    // For wide monitors (1920-2560), use ~70% of width, max 1400
+    // For standard monitors (< 1920), use ~80% of width, min 800
+    
+    let base_width = if monitor_logical_width >= 2560 {
+        // Ultra-wide: 60%
+        ((monitor_logical_width as f64) * 0.6) as i32
+    } else if monitor_logical_width >= 1920 {
+        // Wide: 70%
+        ((monitor_logical_width as f64) * 0.7) as i32
+    } else {
+        // Standard: 80%
+        ((monitor_logical_width as f64) * 0.8) as i32
+    };
+    
+    // Clamp to reasonable range
+    base_width.clamp(800, 1600)
+}
+
 #[tauri::command]
 pub async fn move_to_monitor(
     app: tauri::AppHandle,
+    state: State<'_, AppState>,
     monitor_index: usize,
     anchor: String,
 ) -> Result<(), String> {
@@ -1456,6 +1484,26 @@ pub async fn move_to_monitor(
     let mon_logical_width = (mon_size.width as f64 / target_scale) as i32;
     let mon_logical_height = (mon_size.height as f64 / target_scale) as i32;
     
+    // Generate monitor key for this monitor
+    let monitor_key = generate_monitor_key(mon_size.width, mon_size.height, target_scale);
+    log::info!("Target monitor key: {}", monitor_key);
+    
+    // Get saved width for this monitor or calculate adaptive width
+    let db = state.db.lock().await;
+    let target_width = match db.get_monitor_window_width(&monitor_key).await {
+        Ok(Some(saved_width)) => {
+            log::info!("Using saved width for monitor {}: {}", monitor_key, saved_width);
+            saved_width
+        }
+        _ => {
+            let adaptive_width = calculate_adaptive_width(mon_logical_width);
+            log::info!("Using adaptive width for monitor {}: {} (monitor logical width: {})", 
+                monitor_key, adaptive_width, mon_logical_width);
+            adaptive_width
+        }
+    };
+    drop(db);
+    
     // Get current window scale
     let current_scale = window.scale_factor().map_err(|e| e.to_string())?;
     
@@ -1478,35 +1526,40 @@ pub async fn move_to_monitor(
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
     }
     
-    // Now get the accurate window size (after scale factor update if needed)
+    // Get current window height (we only adapt width, height is determined by drawer mode)
     let win_size = window.outer_size().map_err(|e| e.to_string())?;
     let win_scale = window.scale_factor().map_err(|e| e.to_string())?;
-    let win_logical_width = (win_size.width as f64 / win_scale) as i32;
     let win_logical_height = (win_size.height as f64 / win_scale) as i32;
     
-    log::info!("Window scale: {}, logical size: {}x{}", win_scale, win_logical_width, win_logical_height);
+    // Set the new width
+    window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+        width: target_width as f64,
+        height: win_logical_height as f64
+    })).map_err(|e| e.to_string())?;
+    
+    log::info!("Window size set to: {}x{}", target_width, win_logical_height);
     log::info!("Target monitor[{}]: pos=({}, {}), logical size={}x{}, scale={}", 
         monitor_index, mon_pos.x, mon_pos.y, mon_logical_width, mon_logical_height, target_scale);
     
     // Calculate final position based on anchor using logical coordinates
     let (x, y) = match anchor.as_str() {
         "bottom" => {
-            let x = mon_pos.x + (mon_logical_width - win_logical_width) / 2;
+            let x = mon_pos.x + (mon_logical_width - target_width) / 2;
             let y = mon_pos.y + mon_logical_height - win_logical_height;
             (x, y)
         }
         "top" => {
-            let x = mon_pos.x + (mon_logical_width - win_logical_width) / 2;
+            let x = mon_pos.x + (mon_logical_width - target_width) / 2;
             let y = mon_pos.y;
             (x, y)
         }
         "center" => {
-            let x = mon_pos.x + (mon_logical_width - win_logical_width) / 2;
+            let x = mon_pos.x + (mon_logical_width - target_width) / 2;
             let y = mon_pos.y + (mon_logical_height - win_logical_height) / 2;
             (x, y)
         }
         _ => {
-            let x = mon_pos.x + (mon_logical_width - win_logical_width) / 2;
+            let x = mon_pos.x + (mon_logical_width - target_width) / 2;
             let y = mon_pos.y + mon_logical_height - win_logical_height;
             (x, y)
         }
@@ -1565,6 +1618,116 @@ pub async fn toggle_always_on_top(app: tauri::AppHandle) -> Result<bool, String>
     let current = window.is_always_on_top().map_err(|e| e.to_string())?;
     window.set_always_on_top(!current).map_err(|e| e.to_string())?;
     Ok(!current)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CurrentMonitorInfo {
+    pub monitor_key: String,
+    pub monitor_index: usize,
+    pub monitor_width: i32,
+    pub saved_window_width: Option<i32>,
+}
+
+#[tauri::command]
+pub async fn get_current_monitor_info(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<CurrentMonitorInfo, String> {
+    let window = app.get_webview_window("main").ok_or("Window not found")?;
+    let win_pos = window.outer_position().map_err(|e| e.to_string())?;
+    let win_size = window.outer_size().map_err(|e| e.to_string())?;
+    
+    let monitors = app.available_monitors().map_err(|e| e.to_string())?;
+    
+    // Sort monitors by physical position (left to right) to match UI buttons
+    let mut sorted_monitors: Vec<_> = monitors.iter().enumerate().collect();
+    sorted_monitors.sort_by(|(_, a), (_, b)| {
+        let pos_a = a.position();
+        let pos_b = b.position();
+        match pos_a.x.cmp(&pos_b.x) {
+            std::cmp::Ordering::Equal => pos_a.y.cmp(&pos_b.y),
+            other => other,
+        }
+    });
+    
+    // Find which monitor the window center is on
+    let win_center_x = win_pos.x + win_size.width as i32 / 2;
+    let win_center_y = win_pos.y + win_size.height as i32 / 2;
+    
+    let mut found_monitor = None;
+    for (sorted_index, (_, monitor)) in sorted_monitors.iter().enumerate() {
+        let mon_pos = monitor.position();
+        let mon_size = monitor.size();
+        
+        if win_center_x >= mon_pos.x && win_center_x < mon_pos.x + mon_size.width as i32 &&
+           win_center_y >= mon_pos.y && win_center_y < mon_pos.y + mon_size.height as i32 {
+            found_monitor = Some((sorted_index, *monitor));
+            break;
+        }
+    }
+    
+    let (monitor_index, monitor) = found_monitor.unwrap_or_else(|| {
+        (0, sorted_monitors.first().map(|(_, m)| *m).unwrap())
+    });
+    
+    let mon_size = monitor.size();
+    let scale = monitor.scale_factor();
+    let mon_logical_width = (mon_size.width as f64 / scale) as i32;
+    let monitor_key = generate_monitor_key(mon_size.width, mon_size.height, scale);
+    
+    let db = state.db.lock().await;
+    let saved_width = db.get_monitor_window_width(&monitor_key).await.unwrap_or(None);
+    
+    Ok(CurrentMonitorInfo {
+        monitor_key,
+        monitor_index,
+        monitor_width: mon_logical_width,
+        saved_window_width: saved_width,
+    })
+}
+
+#[tauri::command]
+pub async fn save_window_width_for_monitor(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    width: i32,
+) -> Result<(), String> {
+    let window = app.get_webview_window("main").ok_or("Window not found")?;
+    let win_pos = window.outer_position().map_err(|e| e.to_string())?;
+    let win_size = window.outer_size().map_err(|e| e.to_string())?;
+    
+    let monitors = app.available_monitors().map_err(|e| e.to_string())?;
+    
+    // Find which monitor the window center is on
+    let win_center_x = win_pos.x + win_size.width as i32 / 2;
+    let win_center_y = win_pos.y + win_size.height as i32 / 2;
+    
+    let mut found_monitor = None;
+    for monitor in monitors.iter() {
+        let mon_pos = monitor.position();
+        let mon_size = monitor.size();
+        
+        if win_center_x >= mon_pos.x && win_center_x < mon_pos.x + mon_size.width as i32 &&
+           win_center_y >= mon_pos.y && win_center_y < mon_pos.y + mon_size.height as i32 {
+            found_monitor = Some(monitor);
+            break;
+        }
+    }
+    
+    let monitor = found_monitor.unwrap_or_else(|| monitors.first().unwrap());
+    let mon_size = monitor.size();
+    let scale = monitor.scale_factor();
+    let monitor_key = generate_monitor_key(mon_size.width, mon_size.height, scale);
+    
+    log::info!("Saving window width {} for monitor {}", width, monitor_key);
+    
+    let db = state.db.lock().await;
+    db.save_monitor_window_width(&monitor_key, width)
+        .await
+        .map_err(|e| e.to_string())?;
+    
+    Ok(())
 }
 
 #[tauri::command]
@@ -1626,16 +1789,18 @@ pub async fn snap_to_bottom(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn set_drawer_collapsed(
     app: tauri::AppHandle,
+    state: State<'_, AppState>,
     collapsed: bool,
 ) -> Result<(), String> {
     // Legacy wrapper for backwards compatibility
     let mode = if collapsed { "collapsed" } else { "expanded" };
-    set_drawer_mode(app, mode.to_string()).await
+    set_drawer_mode(app, state, mode.to_string()).await
 }
 
 #[tauri::command]
 pub async fn set_drawer_mode(
     app: tauri::AppHandle,
+    state: State<'_, AppState>,
     mode: String,
 ) -> Result<(), String> {
     let window = app.get_webview_window("main").ok_or("Window not found")?;
@@ -1669,25 +1834,43 @@ pub async fn set_drawer_mode(
     let mon_logical_width = (mon_size.width as f64 / scale) as i32;
     let mon_logical_height = (mon_size.height as f64 / scale) as i32;
 
+    // Generate monitor key for this monitor
+    let monitor_key = generate_monitor_key(mon_size.width, mon_size.height, scale);
+    
+    // Get saved width for this monitor or calculate adaptive width
+    let db = state.db.lock().await;
+    let saved_width = match db.get_monitor_window_width(&monitor_key).await {
+        Ok(Some(w)) => {
+            log::info!("set_drawer_mode: Using saved width {} for monitor {}", w, monitor_key);
+            w
+        }
+        _ => {
+            let adaptive = calculate_adaptive_width(mon_logical_width);
+            log::info!("set_drawer_mode: Using adaptive width {} for monitor {}", adaptive, monitor_key);
+            adaptive
+        }
+    };
+    drop(db);
+
     // Set new size based on mode (in logical pixels)
-    // Width: 1200 for all modes (default app width)
+    // Width: use saved/adaptive width for this monitor
     // Height: varies by mode
-    let (new_logical_width, new_logical_height) = match mode.as_str() {
-        "collapsed" => (1200, 48),    // Just header
-        "expanded" => (1200, 200),    // History view
-        "full" => (1200, 450),        // Settings/Glossary view
-        "popup" => (1200, 350),       // Translation/Polish popup view
-        _ => (1200, 200),
+    let new_logical_height = match mode.as_str() {
+        "collapsed" => 48,    // Just header
+        "expanded" => 280,    // History view (header ~48px + padding ~24px + card 192px)
+        "full" => 450,        // Settings/Glossary view
+        "popup" => 350,       // Translation/Polish popup view
+        _ => 280,
     };
 
     // Set new size using logical coordinates
     window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-        width: new_logical_width as f64,
+        width: saved_width as f64,
         height: new_logical_height as f64
     })).map_err(|e| e.to_string())?;
 
     // Position at bottom center of the current monitor
-    let new_x = mon_pos.x + (mon_logical_width - new_logical_width) / 2;
+    let new_x = mon_pos.x + (mon_logical_width - saved_width) / 2;
     let new_y = mon_pos.y + mon_logical_height - new_logical_height;
 
     window.set_position(tauri::Position::Logical(tauri::LogicalPosition {
@@ -1696,7 +1879,7 @@ pub async fn set_drawer_mode(
     })).map_err(|e| e.to_string())?;
 
     log::info!("set_drawer_mode: mode={}, size={}x{}, pos=({}, {})", 
-        mode, new_logical_width, new_logical_height, new_x, new_y);
+        mode, saved_width, new_logical_height, new_x, new_y);
 
     Ok(())
 }

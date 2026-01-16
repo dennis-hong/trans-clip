@@ -135,11 +135,10 @@ pub fn run() {
                 log::info!("Clipboard monitor started successfully");
             }
 
-            // Hide window on startup - app starts in "hidden" mode
-            // Users can show it via tray icon, Cmd+Shift+V, or Cmd+CC/DD
+            // Show window on startup
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.hide();
-                log::info!("Window hidden on startup (stealth mode)");
+                hotkey::show_window_at_position(&window);
+                log::info!("Window shown on startup");
             }
 
             Ok(())
@@ -186,6 +185,8 @@ pub fn run() {
             commands::snap_to_bottom,
             commands::set_drawer_collapsed,
             commands::set_drawer_mode,
+            commands::get_current_monitor_info,
+            commands::save_window_width_for_monitor,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

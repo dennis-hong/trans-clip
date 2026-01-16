@@ -13,6 +13,7 @@ function App() {
   const [popupMode, setPopupMode] = useState<PopupMode>("none");
   const [sourceText, setSourceText] = useState<string | null>(null);
   const [hasAccessibility, setHasAccessibility] = useState<boolean | null>(null);
+  const [openedFromHistory, setOpenedFromHistory] = useState(false);
 
   // Check accessibility permission on mount
   useEffect(() => {
@@ -54,6 +55,7 @@ function App() {
       const { text } = event.payload;
       if (text && text.trim()) {
         setSourceText(text);
+        setOpenedFromHistory(false);
         setPopupMode("translate");
       }
     });
@@ -68,6 +70,7 @@ function App() {
       const { text } = event.payload;
       if (text && text.trim()) {
         setSourceText(text);
+        setOpenedFromHistory(false);
         setPopupMode("polish");
       }
     });
@@ -118,11 +121,18 @@ function App() {
   }, []);
 
   const handleClosePopup = useCallback(async () => {
-    setPopupMode("none");
     setSourceText(null);
-    // Hide window instead of staying visible (stealth mode)
-    await hideWindow();
-  }, [hideWindow]);
+    
+    // If opened from history, go back to history instead of hiding
+    if (openedFromHistory) {
+      setOpenedFromHistory(false);
+      setPopupMode("history");
+    } else {
+      setPopupMode("none");
+      // Hide window instead of staying visible (stealth mode)
+      await hideWindow();
+    }
+  }, [hideWindow, openedFromHistory]);
 
   // Handle closing history panel
   const handleCloseHistory = useCallback(async () => {
@@ -130,11 +140,25 @@ function App() {
     await hideWindow();
   }, [hideWindow]);
 
+  // Handle translate from history
+  const handleTranslateFromHistory = useCallback((text: string) => {
+    setSourceText(text);
+    setOpenedFromHistory(true);
+    setPopupMode("translate");
+  }, []);
+
+  // Handle polish from history
+  const handlePolishFromHistory = useCallback((text: string) => {
+    setSourceText(text);
+    setOpenedFromHistory(true);
+    setPopupMode("polish");
+  }, []);
+
   // Show translation/polish popup if active
   if (popupMode === "translate" && sourceText) {
     return (
       <div className="h-screen w-full overflow-hidden bg-transparent">
-        <div className="h-full flex flex-col bg-white/95 backdrop-blur-md rounded-t-2xl border border-gray-200/50 border-b-0 shadow-2xl">
+        <div className="h-full flex flex-col bg-gradient-to-b from-gray-50/95 to-white/95 backdrop-blur-md rounded-t-2xl border border-gray-200/50 border-b-0 shadow-2xl">
           <TranslationPopup sourceText={sourceText} onClose={handleClosePopup} />
         </div>
       </div>
@@ -144,7 +168,7 @@ function App() {
   if (popupMode === "polish" && sourceText) {
     return (
       <div className="h-screen w-full overflow-hidden bg-transparent">
-        <div className="h-full flex flex-col bg-white/95 backdrop-blur-md rounded-t-2xl border border-gray-200/50 border-b-0 shadow-2xl">
+        <div className="h-full flex flex-col bg-gradient-to-b from-gray-50/95 to-white/95 backdrop-blur-md rounded-t-2xl border border-gray-200/50 border-b-0 shadow-2xl">
           <PolishPopup sourceText={sourceText} onClose={handleClosePopup} />
         </div>
       </div>
@@ -159,6 +183,8 @@ function App() {
           hasAccessibility={hasAccessibility} 
           onClose={handleCloseHistory}
           isStealthMode={true}
+          onTranslate={handleTranslateFromHistory}
+          onPolish={handlePolishFromHistory}
         />
       </div>
     );
@@ -172,6 +198,8 @@ function App() {
         hasAccessibility={hasAccessibility} 
         onClose={handleCloseHistory}
         isStealthMode={true}
+        onTranslate={handleTranslateFromHistory}
+        onPolish={handlePolishFromHistory}
       />
     </div>
   );

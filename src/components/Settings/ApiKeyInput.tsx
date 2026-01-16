@@ -1,5 +1,4 @@
 import { useState, useCallback, useEffect } from "react";
-import { Button } from "@/components/common";
 import { useSettingsStore } from "@/store";
 
 interface ApiKeyInputProps {
@@ -44,24 +43,33 @@ export function ApiKeyInput({ hasApiKey }: ApiKeyInputProps) {
   if (!isEditing && hasApiKey) {
     return (
       <div className="space-y-2">
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-          Claude API Key
+        <label className="block text-xs font-medium text-yellow-700">
+          Claude API 키
         </label>
         <div className="flex items-center gap-2">
-          <div className="flex-1 px-3 py-2 bg-gray-100 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-            <span className="text-sm text-gray-600 dark:text-gray-400">
+          <div className="flex-1 px-2 py-1.5 bg-yellow-50 rounded-md border border-yellow-300">
+            <span className="text-sm text-yellow-700">
               ••••••••••••••••
             </span>
           </div>
-          <Button variant="secondary" size="sm" onClick={() => setIsEditing(true)}>
-            Change
-          </Button>
-          <Button variant="ghost" size="sm" onClick={handleDelete}>
-            Remove
-          </Button>
+          <button
+            onClick={() => setIsEditing(true)}
+            className="px-2 py-1 text-xs font-medium text-yellow-700 bg-yellow-200 hover:bg-yellow-300 rounded transition-colors"
+          >
+            변경
+          </button>
+          <button
+            onClick={handleDelete}
+            className="px-2 py-1 text-xs text-yellow-600 hover:bg-yellow-200 rounded transition-colors"
+          >
+            삭제
+          </button>
         </div>
-        <p className="text-xs text-green-600 dark:text-green-400">
-          API key is configured
+        <p className="text-[10px] text-green-600 flex items-center gap-1">
+          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+          </svg>
+          API 키가 설정되었습니다
         </p>
       </div>
     );
@@ -69,8 +77,8 @@ export function ApiKeyInput({ hasApiKey }: ApiKeyInputProps) {
 
   return (
     <div className="space-y-2">
-      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-        Claude API Key
+      <label className="block text-xs font-medium text-yellow-700">
+        Claude API 키
       </label>
       <div className="relative">
         <input
@@ -78,12 +86,12 @@ export function ApiKeyInput({ hasApiKey }: ApiKeyInputProps) {
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
           placeholder="sk-ant-..."
-          className="w-full px-3 py-2 pr-10 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm"
+          className="w-full px-2 py-1.5 pr-8 bg-white rounded-md border border-yellow-300 focus:ring-2 focus:ring-yellow-500 focus:border-yellow-400 outline-none text-sm"
         />
         <button
           type="button"
           onClick={() => setShowKey(!showKey)}
-          className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+          className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-yellow-500 hover:text-yellow-700"
         >
           {showKey ? (
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -98,10 +106,9 @@ export function ApiKeyInput({ hasApiKey }: ApiKeyInputProps) {
         </button>
       </div>
       {error && (
-        <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
+        <p className="text-[10px] text-red-600">{error}</p>
       )}
-      <p className="text-xs text-gray-500 dark:text-gray-400">
-        Get your API key from{" "}
+      <p className="text-[10px] text-yellow-600">
         <a
           href="https://console.anthropic.com"
           target="_blank"
@@ -110,21 +117,29 @@ export function ApiKeyInput({ hasApiKey }: ApiKeyInputProps) {
         >
           console.anthropic.com
         </a>
+        에서 발급받으세요
       </p>
       <div className="flex items-center gap-2">
-        <Button
-          variant="primary"
-          size="sm"
+        <button
           onClick={handleSave}
-          loading={isLoading}
           disabled={!apiKey.trim() || isLoading}
+          className="px-3 py-1.5 text-xs font-medium text-white bg-yellow-500 hover:bg-yellow-600 rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
         >
-          Save
-        </Button>
+          {isLoading && (
+            <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+          )}
+          저장
+        </button>
         {hasApiKey && (
-          <Button variant="ghost" size="sm" onClick={handleCancel}>
-            Cancel
-          </Button>
+          <button
+            onClick={handleCancel}
+            className="px-3 py-1.5 text-xs text-yellow-700 hover:bg-yellow-200 rounded-md transition-colors"
+          >
+            취소
+          </button>
         )}
       </div>
     </div>
