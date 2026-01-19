@@ -17,7 +17,7 @@
         "label": "main",
         "title": "TransClip",
         "width": 1200,
-        "height": 200,
+        "height": 280,
         "visible": true,
         "skipTaskbar": false,
         "decorations": false,
@@ -25,7 +25,7 @@
         "alwaysOnTop": true,
         "resizable": true,
         "minWidth": 400,
-        "minHeight": 80
+        "minHeight": 200
       }
     ],
     "security": {
