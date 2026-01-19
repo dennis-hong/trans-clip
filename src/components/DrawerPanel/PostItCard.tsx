@@ -130,14 +130,34 @@ export function PostItCard({ item, index, color, onCopy, onPaste, onDelete, onTo
         </div>
       )}
 
-      {/* Pin indicator */}
-      {item.isPinned && (
-        <div className="absolute -top-2 -right-2 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center shadow-md">
-          <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
+      {/* Top right area: Pin indicator and Delete button */}
+      <div className="absolute -top-2 -right-2 flex items-center gap-1">
+        {/* Delete button - visible on hover */}
+        <button
+          onClick={handleDelete}
+          className={`w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center shadow-md transition-all duration-150 ${
+            isHovered ? "opacity-100 scale-100" : "opacity-0 scale-75"
+          }`}
+          title="삭제"
+        >
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2.5}
+              d="M6 18L18 6M6 6l12 12"
+            />
           </svg>
-        </div>
-      )}
+        </button>
+        {/* Pin indicator */}
+        {item.isPinned && (
+          <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center shadow-md">
+            <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
+            </svg>
+          </div>
+        )}
+      </div>
 
       {/* Title */}
       <div className="font-semibold text-gray-800 text-sm mb-2 truncate">
@@ -229,20 +249,6 @@ export function PostItCard({ item, index, color, onCopy, onPaste, onDelete, onTo
                 strokeLinejoin="round"
                 strokeWidth={2}
                 d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"
-              />
-            </svg>
-          </button>
-          <button
-            onClick={handleDelete}
-            className="p-1 rounded hover:bg-black/10 transition-colors"
-            title="삭제"
-          >
-            <svg className="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
               />
             </svg>
           </button>
