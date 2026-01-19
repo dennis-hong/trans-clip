@@ -2,7 +2,11 @@ use crate::database::{ClipboardItemRow, GlossaryEntryRow, TranslationRow, UserSe
 use crate::keychain;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tauri::{Manager, State};
+
+// Store the last valid monitor index to preserve position across hide/show cycles
+static LAST_MONITOR_INDEX: AtomicUsize = AtomicUsize::new(0);
 
 // ============================================
 // Response Types
@@ -1472,6 +1476,10 @@ pub async fn move_to_monitor(
         return Err("Invalid monitor index".to_string());
     }
     
+    // Save the monitor index for later use (e.g., when set_drawer_mode is called)
+    LAST_MONITOR_INDEX.store(monitor_index, Ordering::SeqCst);
+    log::info!("move_to_monitor: saved LAST_MONITOR_INDEX={}", monitor_index);
+    
     let window = app.get_webview_window("main").ok_or("Window not found")?;
     
     // Get target monitor info
@@ -1604,12 +1612,19 @@ pub async fn get_current_monitor_index(app: tauri::AppHandle) -> Result<usize, S
         
         if win_center_x >= mon_pos.x && win_center_x < mon_pos.x + mon_size.width as i32 &&
            win_center_y >= mon_pos.y && win_center_y < mon_pos.y + mon_size.height as i32 {
+            // Update the saved monitor index
+            LAST_MONITOR_INDEX.store(sorted_index, Ordering::SeqCst);
             return Ok(sorted_index);
         }
     }
     
-    // Default to first monitor if not found
-    Ok(0)
+    // Default to saved index or first monitor if not found
+    let saved_index = LAST_MONITOR_INDEX.load(Ordering::SeqCst);
+    if saved_index < sorted_monitors.len() {
+        Ok(saved_index)
+    } else {
+        Ok(0)
+    }
 }
 
 #[tauri::command]
@@ -1738,9 +1753,22 @@ pub async fn snap_to_bottom(app: tauri::AppHandle) -> Result<(), String> {
     
     // Find which monitor the window is on
     let monitors = app.available_monitors().map_err(|e| e.to_string())?;
-    let mut target_monitor = monitors.first().ok_or("No monitors found")?;
     
-    for monitor in monitors.iter() {
+    // Sort monitors by position (left to right) for consistent indexing
+    let mut sorted_monitors: Vec<_> = monitors.iter().enumerate().collect();
+    sorted_monitors.sort_by(|(_, a), (_, b)| {
+        let pos_a = a.position();
+        let pos_b = b.position();
+        match pos_a.x.cmp(&pos_b.x) {
+            std::cmp::Ordering::Equal => pos_a.y.cmp(&pos_b.y),
+            other => other,
+        }
+    });
+    
+    let mut target_monitor = sorted_monitors.first().map(|(_, m)| *m).ok_or("No monitors found")?;
+    let mut found_index = 0usize;
+    
+    for (sorted_index, (_, monitor)) in sorted_monitors.iter().enumerate() {
         let mon_pos = monitor.position();
         let mon_size = monitor.size();
         let scale = monitor.scale_factor();
@@ -1761,10 +1789,15 @@ pub async fn snap_to_bottom(app: tauri::AppHandle) -> Result<(), String> {
         
         if win_center_x >= mon_pos.x && win_center_x < mon_pos.x + mon_logical_width &&
            win_center_y >= mon_pos.y && win_center_y < mon_pos.y + mon_logical_height {
-            target_monitor = monitor;
+            target_monitor = *monitor;
+            found_index = sorted_index;
             break;
         }
     }
+    
+    // Update the saved monitor index
+    LAST_MONITOR_INDEX.store(found_index, Ordering::SeqCst);
+    log::info!("snap_to_bottom: updated LAST_MONITOR_INDEX={}", found_index);
     
     let mon_pos = target_monitor.position();
     let mon_size = target_monitor.size();
@@ -1804,27 +1837,34 @@ pub async fn set_drawer_mode(
     mode: String,
 ) -> Result<(), String> {
     let window = app.get_webview_window("main").ok_or("Window not found")?;
-    let win_pos = window.outer_position().map_err(|e| e.to_string())?;
-    let win_size = window.outer_size().map_err(|e| e.to_string())?;
 
-    // Find which monitor the window is on using physical coordinates
+    // Get monitors and sort by position (left to right)
     let monitors = app.available_monitors().map_err(|e| e.to_string())?;
-    let mut target_monitor = monitors.first().ok_or("No monitors found")?;
-
-    let win_center_x = win_pos.x + win_size.width as i32 / 2;
-    let win_center_y = win_pos.y + win_size.height as i32 / 2;
-
-    for monitor in monitors.iter() {
-        let mon_pos = monitor.position();
-        let mon_size = monitor.size();
-
-        // Check if window center is within this monitor (physical coordinates)
-        if win_center_x >= mon_pos.x && win_center_x < mon_pos.x + mon_size.width as i32 &&
-           win_center_y >= mon_pos.y && win_center_y < mon_pos.y + mon_size.height as i32 {
-            target_monitor = monitor;
-            break;
+    let mut sorted_monitors: Vec<_> = monitors.iter().collect();
+    sorted_monitors.sort_by(|a, b| {
+        let pos_a = a.position();
+        let pos_b = b.position();
+        match pos_a.x.cmp(&pos_b.x) {
+            std::cmp::Ordering::Equal => pos_a.y.cmp(&pos_b.y),
+            other => other,
         }
+    });
+
+    if sorted_monitors.is_empty() {
+        return Err("No monitors found".to_string());
     }
+
+    // Use the saved monitor index to determine which monitor to position on
+    // This preserves the monitor position across hide/show cycles
+    let saved_index = LAST_MONITOR_INDEX.load(Ordering::SeqCst);
+    let monitor_index = if saved_index < sorted_monitors.len() {
+        saved_index
+    } else {
+        0 // Fallback to first monitor if saved index is invalid
+    };
+
+    let target_monitor = sorted_monitors[monitor_index];
+    log::info!("set_drawer_mode: using saved monitor index={} for mode={}", monitor_index, mode);
 
     let mon_pos = target_monitor.position();
     let mon_size = target_monitor.size();
