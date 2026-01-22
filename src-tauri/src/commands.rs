@@ -1954,54 +1954,57 @@ pub async fn set_drawer_mode(
         return Err("No monitors found".to_string());
     }
 
-    // Check if window is visible - if not, use saved monitor index
+    // Check if window is visible
     let is_visible = window.is_visible().unwrap_or(false);
 
-    let monitor_index = if is_visible {
-        // Window is visible, determine which monitor it's on based on position
-        let win_pos = window.outer_position().map_err(|e| e.to_string())?;
-        let win_size = window.outer_size().map_err(|e| e.to_string())?;
-        let win_center_x = win_pos.x + win_size.width as i32 / 2;
-        let win_center_y = win_pos.y + win_size.height as i32 / 2;
+    // Get current window position (in logical pixels) if visible
+    let current_logical_x = if is_visible {
+        let pos = window.outer_position().map_err(|e| e.to_string())?;
+        let win_scale = window.scale_factor().map_err(|e| e.to_string())?;
+        Some((pos.x as f64 / win_scale) as i32)
+    } else {
+        None
+    };
 
-        let mut current_monitor_index: Option<usize> = None;
+    // Find which monitor to use based on current X position or saved index
+    let (monitor_index, target_monitor) = if let Some(current_x) = current_logical_x {
+        // Window is visible - find monitor containing current X position
+        let mut found_idx = 0;
+        let mut found_monitor = sorted_monitors[0];
+
         for (idx, monitor) in sorted_monitors.iter().enumerate() {
             let mon_pos = monitor.position();
             let mon_size = monitor.size();
-            if win_center_x >= mon_pos.x
-                && win_center_x < mon_pos.x + mon_size.width as i32
-                && win_center_y >= mon_pos.y
-                && win_center_y < mon_pos.y + mon_size.height as i32
-            {
-                current_monitor_index = Some(idx);
+            let scale = monitor.scale_factor();
+            let mon_logical_width = (mon_size.width as f64 / scale) as i32;
+
+            // Check if current_x is within this monitor's horizontal bounds
+            if current_x >= mon_pos.x && current_x < mon_pos.x + mon_logical_width {
+                found_idx = idx;
+                found_monitor = *monitor;
                 break;
             }
+
+            // If X is past this monitor, this monitor becomes the candidate
+            // (handles case where X is between monitors or past last monitor)
+            if current_x >= mon_pos.x {
+                found_idx = idx;
+                found_monitor = *monitor;
+            }
         }
 
-        current_monitor_index.unwrap_or_else(|| {
-            let saved_index = LAST_MONITOR_INDEX.load(Ordering::SeqCst);
-            if saved_index < sorted_monitors.len() {
-                saved_index
-            } else {
-                0
-            }
-        })
+        log::info!("set_drawer_mode: window visible at x={}, found monitor index={}", current_x, found_idx);
+        (found_idx, found_monitor)
     } else {
-        // Window is not visible, use saved monitor index
+        // Window is not visible - use saved monitor index
         let saved_index = LAST_MONITOR_INDEX.load(Ordering::SeqCst);
-        log::info!("set_drawer_mode: window not visible, using saved monitor index={}", saved_index);
-        if saved_index < sorted_monitors.len() {
-            saved_index
-        } else {
-            0
-        }
+        let idx = if saved_index < sorted_monitors.len() { saved_index } else { 0 };
+        log::info!("set_drawer_mode: window not visible, using saved monitor index={}", idx);
+        (idx, sorted_monitors[idx])
     };
 
-    // Update LAST_MONITOR_INDEX with the current monitor
+    // Update LAST_MONITOR_INDEX
     LAST_MONITOR_INDEX.store(monitor_index, Ordering::SeqCst);
-
-    let target_monitor = sorted_monitors[monitor_index];
-    log::info!("set_drawer_mode: using monitor index={} for mode={}", monitor_index, mode);
 
     let mon_pos = target_monitor.position();
     let mon_size = target_monitor.size();
@@ -2013,7 +2016,7 @@ pub async fn set_drawer_mode(
 
     // Generate monitor key for this monitor
     let monitor_key = generate_monitor_key(mon_size.width, mon_size.height, scale);
-    
+
     // Get saved width for this monitor or calculate adaptive width
     let db = state.db.lock().await;
     let saved_width = match db.get_monitor_window_width(&monitor_key).await {
@@ -2029,9 +2032,7 @@ pub async fn set_drawer_mode(
     };
     drop(db);
 
-    // Set new size based on mode (in logical pixels)
-    // Width: use saved/adaptive width for this monitor
-    // Height: varies by mode
+    // Set new height based on mode
     let new_logical_height = match mode.as_str() {
         "collapsed" => 48,    // Just header
         "expanded" => 280,    // History view (header ~48px + padding ~24px + card 192px)
@@ -2046,8 +2047,16 @@ pub async fn set_drawer_mode(
         height: new_logical_height as f64
     })).map_err(|e| e.to_string())?;
 
-    // Position at bottom center of the current monitor
-    let new_x = mon_pos.x + (mon_logical_width - saved_width) / 2;
+    // Calculate position
+    let new_x = if let Some(current_x) = current_logical_x {
+        // Keep current X, but clamp to current monitor bounds
+        let min_x = mon_pos.x;
+        let max_x = mon_pos.x + mon_logical_width - saved_width;
+        current_x.clamp(min_x, max_x)
+    } else {
+        // Center horizontally on the monitor
+        mon_pos.x + (mon_logical_width - saved_width) / 2
+    };
     let new_y = mon_pos.y + mon_logical_height - new_logical_height;
 
     window.set_position(tauri::Position::Logical(tauri::LogicalPosition {
@@ -2055,8 +2064,8 @@ pub async fn set_drawer_mode(
         y: new_y as f64
     })).map_err(|e| e.to_string())?;
 
-    log::info!("set_drawer_mode: mode={}, size={}x{}, pos=({}, {})", 
-        mode, saved_width, new_logical_height, new_x, new_y);
+    log::info!("set_drawer_mode: mode={}, monitor={}, size={}x{}, pos=({}, {})",
+        mode, monitor_index, saved_width, new_logical_height, new_x, new_y);
 
     Ok(())
 }
