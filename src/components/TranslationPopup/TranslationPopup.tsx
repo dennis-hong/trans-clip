@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "@/hooks/useTranslation";
 
@@ -12,6 +12,12 @@ export function TranslationPopup({
   onClose,
 }: TranslationPopupProps) {
   const { translate, isLoading, error, result } = useTranslation();
+  const [editableText, setEditableText] = useState(sourceText);
+
+  // Sync editableText when sourceText changes
+  useEffect(() => {
+    setEditableText(sourceText);
+  }, [sourceText]);
 
   // Translate on mount
   useEffect(() => {
@@ -20,10 +26,10 @@ export function TranslationPopup({
     }
   }, [sourceText, translate]);
 
-  // Handle ESC or Backspace key to close
+  // Handle ESC key to close
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" || e.key === "Backspace") {
+      if (e.key === "Escape") {
         e.preventDefault();
         onClose();
       }
@@ -63,6 +69,15 @@ export function TranslationPopup({
       }
     }
   }, [result?.translatedText, onClose]);
+
+  const handleRetranslate = useCallback(() => {
+    if (editableText.trim()) {
+      translate(editableText);
+    }
+  }, [editableText, translate]);
+
+  // Check if source text has been modified
+  const isSourceModified = editableText !== sourceText;
 
   const detectedLanguage = result?.detectedLanguage ?? "en";
   const targetLanguage = detectedLanguage === "ko" ? "en" : "ko";
@@ -117,7 +132,6 @@ export function TranslationPopup({
 
         {/* Keyboard hint */}
         <div className="hidden sm:flex items-center gap-1 text-[10px] text-gray-400">
-          <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">⌫</span>
           <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">ESC</span>
         </div>
 
@@ -141,19 +155,25 @@ export function TranslationPopup({
       {/* Content - 포스트잇 스타일 카드 */}
       <div className="flex-1 overflow-hidden p-4">
         <div className="h-full flex gap-4">
-          {/* Source Text - 노란색 포스트잇 */}
+          {/* Source Text - 노란색 포스트잇 (수정 가능) */}
           <div className="flex-1 flex flex-col min-w-0">
             <div className="flex items-center gap-2 mb-2 px-1">
               <span className="text-xs font-medium text-amber-700">📝 원문</span>
               <span className="text-[10px] text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">
                 {sourceLabel}
               </span>
+              {isSourceModified && (
+                <span className="text-[10px] text-orange-600 bg-orange-100 px-1.5 py-0.5 rounded">
+                  수정됨
+                </span>
+              )}
             </div>
-            <div className="flex-1 p-4 bg-yellow-100 border-2 border-yellow-300 rounded-lg shadow-md overflow-y-auto">
-              <p className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
-                {sourceText}
-              </p>
-            </div>
+            <textarea
+              value={editableText}
+              onChange={(e) => setEditableText(e.target.value)}
+              className="flex-1 p-4 bg-yellow-100 border-2 border-yellow-300 rounded-lg shadow-md resize-none text-sm text-gray-800 leading-relaxed focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400"
+              placeholder="원문을 수정하여 다시 번역할 수 있습니다..."
+            />
           </div>
 
           {/* Arrow */}
@@ -207,6 +227,13 @@ export function TranslationPopup({
 
       {/* Footer - 액션 버튼 */}
       <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-200/50">
+        <button
+          onClick={handleRetranslate}
+          disabled={isLoading || !editableText.trim()}
+          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          다시 번역
+        </button>
         <button
           onClick={handleCopy}
           disabled={isLoading || !result?.translatedText}

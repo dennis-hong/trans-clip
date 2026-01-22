@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { usePolish } from "@/hooks/usePolish";
 import {
@@ -16,6 +16,13 @@ interface PolishPopupProps {
 
 export function PolishPopup({ sourceText, onClose }: PolishPopupProps) {
   const { polish, isLoading, error, result } = usePolish();
+  const [editableText, setEditableText] = useState(sourceText);
+  const isInitialMount = useRef(true);
+
+  // Sync editableText when sourceText changes
+  useEffect(() => {
+    setEditableText(sourceText);
+  }, [sourceText]);
 
   // Get last used settings from store
   const {
@@ -27,17 +34,18 @@ export function PolishPopup({ sourceText, onClose }: PolishPopupProps) {
     toggleOption,
   } = usePolishStore();
 
-  // Polish on mount and when settings change
+  // Polish on mount only
   useEffect(() => {
-    if (sourceText) {
+    if (sourceText && isInitialMount.current) {
+      isInitialMount.current = false;
       polish(sourceText, lastContext, lastChannel, lastOptions);
     }
   }, [sourceText, lastContext, lastChannel, lastOptions, polish]);
 
-  // Handle ESC or Backspace key to close
+  // Handle ESC key to close
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" || e.key === "Backspace") {
+      if (e.key === "Escape") {
         e.preventDefault();
         onClose();
       }
@@ -83,10 +91,13 @@ export function PolishPopup({ sourceText, onClose }: PolishPopupProps) {
   }, [result?.polishedText, onClose]);
 
   const handleRepolish = useCallback(() => {
-    if (sourceText) {
-      polish(sourceText, lastContext, lastChannel, lastOptions);
+    if (editableText.trim()) {
+      polish(editableText, lastContext, lastChannel, lastOptions);
     }
-  }, [sourceText, lastContext, lastChannel, lastOptions, polish]);
+  }, [editableText, lastContext, lastChannel, lastOptions, polish]);
+
+  // Check if source text has been modified
+  const isSourceModified = editableText !== sourceText;
 
   const handleContextChange = (context: PolishContext) => {
     setLastContext(context);
@@ -133,7 +144,6 @@ export function PolishPopup({ sourceText, onClose }: PolishPopupProps) {
 
         {/* Keyboard hint */}
         <div className="hidden sm:flex items-center gap-1 text-[10px] text-gray-400">
-          <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">⌫</span>
           <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">ESC</span>
         </div>
 
@@ -158,16 +168,22 @@ export function PolishPopup({ sourceText, onClose }: PolishPopupProps) {
       <div className="flex-1 overflow-hidden p-4 flex flex-col gap-3">
         {/* Top: Source & Result 좌우 배치 */}
         <div className="flex-1 flex gap-4 min-h-0">
-          {/* Source Text - 노란색 포스트잇 */}
+          {/* Source Text - 노란색 포스트잇 (수정 가능) */}
           <div className="flex-1 flex flex-col min-w-0">
             <div className="flex items-center gap-2 mb-2 px-1">
               <span className="text-xs font-medium text-amber-700">📝 원문 (러프한 초안)</span>
+              {isSourceModified && (
+                <span className="text-[10px] text-orange-600 bg-orange-100 px-1.5 py-0.5 rounded">
+                  수정됨
+                </span>
+              )}
             </div>
-            <div className="flex-1 p-3 bg-yellow-100 border-2 border-yellow-300 rounded-lg shadow-md overflow-y-auto">
-              <p className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
-                {sourceText}
-              </p>
-            </div>
+            <textarea
+              value={editableText}
+              onChange={(e) => setEditableText(e.target.value)}
+              className="flex-1 p-3 bg-yellow-100 border-2 border-yellow-300 rounded-lg shadow-md resize-none text-sm text-gray-800 leading-relaxed focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400"
+              placeholder="원문을 수정하여 다시 다듬을 수 있습니다..."
+            />
           </div>
 
           {/* Arrow */}
@@ -285,7 +301,7 @@ export function PolishPopup({ sourceText, onClose }: PolishPopupProps) {
       <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-200/50">
         <button
           onClick={handleRepolish}
-          disabled={isLoading}
+          disabled={isLoading || !editableText.trim()}
           className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           다시 다듬기

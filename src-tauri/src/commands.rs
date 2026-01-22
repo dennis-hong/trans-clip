@@ -8,6 +8,106 @@ use tauri::{Manager, State};
 // Store the last valid monitor index to preserve position across hide/show cycles
 static LAST_MONITOR_INDEX: AtomicUsize = AtomicUsize::new(0);
 
+/// Update LAST_MONITOR_INDEX based on current mouse cursor position
+/// This is called before showing the window to ensure it appears on the correct monitor
+pub fn update_monitor_from_cursor(app: &tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        use core_graphics::event::CGEvent;
+        use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+
+        // Get current mouse position
+        let source = match CGEventSource::new(CGEventSourceStateID::HIDSystemState) {
+            Ok(s) => s,
+            Err(_) => {
+                log::warn!("Failed to create event source for cursor position");
+                return;
+            }
+        };
+        let event = match CGEvent::new(source) {
+            Ok(e) => e,
+            Err(_) => {
+                log::warn!("Failed to create event for cursor position");
+                return;
+            }
+        };
+        let cursor_pos = event.location();
+        let cursor_x = cursor_pos.x as i32;
+        let cursor_y = cursor_pos.y as i32;
+
+        log::info!("Cursor position: ({}, {})", cursor_x, cursor_y);
+
+        // Get monitors and sort by position
+        let monitors = match app.available_monitors() {
+            Ok(m) => m,
+            Err(e) => {
+                log::error!("Failed to get monitors: {}", e);
+                return;
+            }
+        };
+
+        let mut sorted_monitors: Vec<_> = monitors.iter().collect();
+        sorted_monitors.sort_by(|a, b| {
+            let pos_a = a.position();
+            let pos_b = b.position();
+            match pos_a.x.cmp(&pos_b.x) {
+                std::cmp::Ordering::Equal => pos_a.y.cmp(&pos_b.y),
+                other => other,
+            }
+        });
+
+        // Find which monitor contains the cursor
+        for (idx, monitor) in sorted_monitors.iter().enumerate() {
+            let mon_pos = monitor.position();
+            let mon_size = monitor.size();
+            let scale = monitor.scale_factor();
+
+            // Monitor position is in physical pixels, cursor is in logical
+            // Convert cursor to physical for comparison
+            let cursor_physical_x = (cursor_x as f64 * scale) as i32;
+            let cursor_physical_y = (cursor_y as f64 * scale) as i32;
+
+            if cursor_physical_x >= mon_pos.x
+                && cursor_physical_x < mon_pos.x + mon_size.width as i32
+                && cursor_physical_y >= mon_pos.y
+                && cursor_physical_y < mon_pos.y + mon_size.height as i32
+            {
+                log::info!("Cursor is on monitor {} (sorted index)", idx);
+                LAST_MONITOR_INDEX.store(idx, Ordering::SeqCst);
+                return;
+            }
+        }
+
+        // Fallback: try with logical coordinates directly (for single-scale setups)
+        for (idx, monitor) in sorted_monitors.iter().enumerate() {
+            let mon_pos = monitor.position();
+            let mon_size = monitor.size();
+            let scale = monitor.scale_factor();
+
+            let mon_logical_width = (mon_size.width as f64 / scale) as i32;
+            let mon_logical_height = (mon_size.height as f64 / scale) as i32;
+
+            if cursor_x >= mon_pos.x
+                && cursor_x < mon_pos.x + mon_logical_width
+                && cursor_y >= mon_pos.y
+                && cursor_y < mon_pos.y + mon_logical_height
+            {
+                log::info!("Cursor is on monitor {} (logical fallback)", idx);
+                LAST_MONITOR_INDEX.store(idx, Ordering::SeqCst);
+                return;
+            }
+        }
+
+        log::warn!("Could not determine monitor from cursor position");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        log::info!("Cursor-based monitor detection not implemented for this platform");
+    }
+}
+
 // ============================================
 // Response Types
 // ============================================
@@ -1854,17 +1954,54 @@ pub async fn set_drawer_mode(
         return Err("No monitors found".to_string());
     }
 
-    // Use the saved monitor index to determine which monitor to position on
-    // This preserves the monitor position across hide/show cycles
-    let saved_index = LAST_MONITOR_INDEX.load(Ordering::SeqCst);
-    let monitor_index = if saved_index < sorted_monitors.len() {
-        saved_index
+    // Check if window is visible - if not, use saved monitor index
+    let is_visible = window.is_visible().unwrap_or(false);
+
+    let monitor_index = if is_visible {
+        // Window is visible, determine which monitor it's on based on position
+        let win_pos = window.outer_position().map_err(|e| e.to_string())?;
+        let win_size = window.outer_size().map_err(|e| e.to_string())?;
+        let win_center_x = win_pos.x + win_size.width as i32 / 2;
+        let win_center_y = win_pos.y + win_size.height as i32 / 2;
+
+        let mut current_monitor_index: Option<usize> = None;
+        for (idx, monitor) in sorted_monitors.iter().enumerate() {
+            let mon_pos = monitor.position();
+            let mon_size = monitor.size();
+            if win_center_x >= mon_pos.x
+                && win_center_x < mon_pos.x + mon_size.width as i32
+                && win_center_y >= mon_pos.y
+                && win_center_y < mon_pos.y + mon_size.height as i32
+            {
+                current_monitor_index = Some(idx);
+                break;
+            }
+        }
+
+        current_monitor_index.unwrap_or_else(|| {
+            let saved_index = LAST_MONITOR_INDEX.load(Ordering::SeqCst);
+            if saved_index < sorted_monitors.len() {
+                saved_index
+            } else {
+                0
+            }
+        })
     } else {
-        0 // Fallback to first monitor if saved index is invalid
+        // Window is not visible, use saved monitor index
+        let saved_index = LAST_MONITOR_INDEX.load(Ordering::SeqCst);
+        log::info!("set_drawer_mode: window not visible, using saved monitor index={}", saved_index);
+        if saved_index < sorted_monitors.len() {
+            saved_index
+        } else {
+            0
+        }
     };
 
+    // Update LAST_MONITOR_INDEX with the current monitor
+    LAST_MONITOR_INDEX.store(monitor_index, Ordering::SeqCst);
+
     let target_monitor = sorted_monitors[monitor_index];
-    log::info!("set_drawer_mode: using saved monitor index={} for mode={}", monitor_index, mode);
+    log::info!("set_drawer_mode: using monitor index={} for mode={}", monitor_index, mode);
 
     let mon_pos = target_monitor.position();
     let mon_size = target_monitor.size();
