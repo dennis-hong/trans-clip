@@ -154,6 +154,13 @@ function App() {
     setPopupMode("polish");
   }, []);
 
+  // Handle translate from polish popup
+  const handleTranslateFromPolish = useCallback((text: string) => {
+    setSourceText(text);
+    setOpenedFromHistory(false);
+    setPopupMode("translate");
+  }, []);
+
   // Show translation/polish popup if active
   if (popupMode === "translate" && sourceText) {
     return (
@@ -169,7 +176,7 @@ function App() {
     return (
       <div className="h-screen w-full overflow-hidden bg-transparent">
         <div className="h-full flex flex-col bg-gradient-to-b from-gray-50/95 to-white/95 backdrop-blur-md rounded-t-2xl border border-gray-200/50 border-b-0 shadow-2xl">
-          <PolishPopup sourceText={sourceText} onClose={handleClosePopup} />
+          <PolishPopup sourceText={sourceText} onClose={handleClosePopup} onTranslate={handleTranslateFromPolish} />
         </div>
       </div>
     );

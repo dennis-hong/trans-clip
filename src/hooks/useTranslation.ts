@@ -8,7 +8,7 @@ interface UseTranslationOptions {
 }
 
 interface UseTranslationReturn {
-  translate: (text: string) => Promise<TranslateResponse>;
+  translate: (text: string, model?: string) => Promise<TranslateResponse>;
   isLoading: boolean;
   error: string | null;
   result: TranslateResponse | null;
@@ -23,7 +23,7 @@ export function useTranslation(
   const [result, setResult] = useState<TranslateResponse | null>(null);
 
   const translate = useCallback(
-    async (text: string): Promise<TranslateResponse> => {
+    async (text: string, model?: string): Promise<TranslateResponse> => {
       setIsLoading(true);
       setError(null);
 
@@ -35,6 +35,7 @@ export function useTranslation(
               ? undefined
               : options.sourceLanguage,
           targetLanguage: options.targetLanguage,
+          model,
         });
 
         setResult(response);

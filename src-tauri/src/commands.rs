@@ -347,6 +347,7 @@ pub async fn translate(
     text: String,
     source_language: Option<String>,
     target_language: Option<String>,
+    model: Option<String>,
 ) -> Result<TranslateResponse, String> {
     // Validation
     if text.is_empty() {
@@ -411,29 +412,34 @@ pub async fn translate(
         }
     });
 
-    // Check cache first
-    if let Ok(Some(cached)) = db
-        .find_cached_translation(&text, &src_lang, &tgt_lang, settings.translation_cache_days)
-        .await
-    {
-        return Ok(TranslateResponse {
-            success: true,
-            translated_text: Some(cached.translated_text),
-            detected_language: Some(src_lang),
-            from_cache: true,
-            glossary_applied: cached
-                .glossary_used
-                .map(|g| serde_json::from_str(&g).unwrap_or_default())
-                .unwrap_or_default(),
-            token_usage: match (cached.input_tokens, cached.output_tokens) {
-                (Some(i), Some(o)) => Some(TokenUsage {
-                    input_tokens: i,
-                    output_tokens: o,
-                }),
-                _ => None,
-            },
-            error: None,
-        });
+    // Check if explicit model is provided (user wants a specific model, skip cache)
+    let explicit_model = model.is_some();
+
+    // Check cache first (skip cache if explicit model is provided)
+    if !explicit_model {
+        if let Ok(Some(cached)) = db
+            .find_cached_translation(&text, &src_lang, &tgt_lang, settings.translation_cache_days)
+            .await
+        {
+            return Ok(TranslateResponse {
+                success: true,
+                translated_text: Some(cached.translated_text),
+                detected_language: Some(src_lang),
+                from_cache: true,
+                glossary_applied: cached
+                    .glossary_used
+                    .map(|g| serde_json::from_str(&g).unwrap_or_default())
+                    .unwrap_or_default(),
+                token_usage: match (cached.input_tokens, cached.output_tokens) {
+                    (Some(i), Some(o)) => Some(TokenUsage {
+                        input_tokens: i,
+                        output_tokens: o,
+                    }),
+                    _ => None,
+                },
+                error: None,
+            });
+        }
     }
 
     // Find matching glossary entries (language-agnostic)
@@ -456,6 +462,9 @@ pub async fn translate(
         )
     };
 
+    // Use provided model or fall back to settings
+    let use_model = model.unwrap_or_else(|| settings.preferred_model.clone());
+
     // Call Claude API
     let client = reqwest::Client::new();
     let prompt = format!(
@@ -472,7 +481,7 @@ pub async fn translate(
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
         .json(&serde_json::json!({
-            "model": settings.preferred_model,
+            "model": use_model,
             "max_tokens": 4096,
             "messages": [{"role": "user", "content": prompt}]
         }))
@@ -502,7 +511,7 @@ pub async fn translate(
                     translated_text: translated_text.clone(),
                     source_language: src_lang.clone(),
                     target_language: tgt_lang,
-                    model: settings.preferred_model,
+                    model: use_model,
                     created_at: chrono::Utc::now().to_rfc3339(),
                     glossary_used: Some(serde_json::to_string(&glossary_ids).unwrap()),
                     input_tokens,
@@ -619,6 +628,7 @@ pub async fn polish(
     context: String,
     channel: String,
     options: Vec<String>,
+    model: Option<String>,
 ) -> Result<PolishResponse, String> {
     // Validation
     if text.is_empty() {
@@ -670,6 +680,9 @@ pub async fn polish(
     // Detect language
     let detected_lang = detect_language(&text);
 
+    // Use provided model or fall back to settings
+    let use_model = model.unwrap_or_else(|| settings.preferred_model.clone());
+
     // Build prompts using the prompts module
     let system_prompt = if detected_lang == "ko" {
         prompts::polish::build_system_prompt()
@@ -693,7 +706,7 @@ pub async fn polish(
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
         .json(&serde_json::json!({
-            "model": settings.preferred_model,
+            "model": use_model,
             "max_tokens": 4096,
             "system": system_prompt,
             "messages": [{"role": "user", "content": user_prompt}]

@@ -73,6 +73,24 @@ export type Language = "ko" | "en";
 export type ClaudeModel = "claude-haiku-4-5-20251001" | "claude-sonnet-4-5-20250929" | "claude-opus-4-5-20251101";
 export type PopupPosition = "cursor" | "center" | "top-right";
 
+/**
+ * 모델 정보
+ */
+export interface ClaudeModelInfo {
+  id: ClaudeModel;
+  name: string;
+  description: string;
+}
+
+/**
+ * 사용 가능한 Claude 모델 목록
+ */
+export const CLAUDE_MODELS: ClaudeModelInfo[] = [
+  { id: "claude-haiku-4-5-20251001", name: "Haiku", description: "빠름" },
+  { id: "claude-sonnet-4-5-20250929", name: "Sonnet", description: "균형" },
+  { id: "claude-opus-4-5-20251101", name: "Opus", description: "고품질" },
+] as const;
+
 // ============================================
 // Polish (Text Refinement) Types
 // ============================================

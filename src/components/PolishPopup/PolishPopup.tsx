@@ -8,19 +8,22 @@ import {
   POLISH_CHANNELS,
   POLISH_OPTIONS,
 } from "@/store";
-import type { PolishContext, PolishChannel, PolishOption } from "@/types";
+import type { PolishContext, PolishChannel, PolishOption, ClaudeModel } from "@/types";
+import { CLAUDE_MODELS } from "@/types";
 
 interface PolishPopupProps {
   sourceText: string;
   onClose: () => void;
+  onTranslate?: (text: string) => void;
 }
 
-export function PolishPopup({ sourceText, onClose }: PolishPopupProps) {
+export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupProps) {
   const { polish, isLoading, error, result } = usePolish();
   const { createItem } = useClipboardStore();
   const [editableText, setEditableText] = useState(sourceText);
   const [isSaved, setIsSaved] = useState(false);
   const isInitialMount = useRef(true);
+  const [selectedModel, setSelectedModel] = useState<ClaudeModel | undefined>(undefined);
 
   // Sync editableText when sourceText changes
   useEffect(() => {
@@ -95,9 +98,9 @@ export function PolishPopup({ sourceText, onClose }: PolishPopupProps) {
 
   const handleRepolish = useCallback(() => {
     if (editableText.trim()) {
-      polish(editableText, lastContext, lastChannel, lastOptions);
+      polish(editableText, lastContext, lastChannel, lastOptions, selectedModel);
     }
-  }, [editableText, lastContext, lastChannel, lastOptions, polish]);
+  }, [editableText, lastContext, lastChannel, lastOptions, selectedModel, polish]);
 
   const handleSaveAsPostIt = useCallback(async () => {
     if (result?.polishedText) {
@@ -109,6 +112,12 @@ export function PolishPopup({ sourceText, onClose }: PolishPopupProps) {
       }
     }
   }, [result?.polishedText, createItem]);
+
+  const handleTranslate = useCallback(() => {
+    if (result?.polishedText && onTranslate) {
+      onTranslate(result.polishedText);
+    }
+  }, [result?.polishedText, onTranslate]);
 
   // Check if source text has been modified
   const isSourceModified = editableText !== sourceText;
@@ -283,6 +292,30 @@ export function PolishPopup({ sourceText, onClose }: PolishPopupProps) {
               </select>
             </div>
 
+            {/* Model Select + Repolish button */}
+            <div className="flex items-center gap-1.5">
+              <label className="text-[10px] text-gray-500">모델</label>
+              <select
+                value={selectedModel ?? ""}
+                onChange={(e) => setSelectedModel(e.target.value ? e.target.value as ClaudeModel : undefined)}
+                className="px-2 py-1 text-xs bg-white border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+              >
+                <option value="">기본값</option>
+                {CLAUDE_MODELS.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.name} ({model.description})
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={handleRepolish}
+                disabled={isLoading || !editableText.trim()}
+                className="px-3 py-1 text-xs font-medium text-purple-700 bg-purple-50 border border-purple-300 rounded-md hover:bg-purple-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                다시 다듬기
+              </button>
+            </div>
+
             {/* Divider */}
             <div className="w-px h-5 bg-gray-300" />
 
@@ -314,11 +347,11 @@ export function PolishPopup({ sourceText, onClose }: PolishPopupProps) {
       {/* Footer - 액션 버튼 */}
       <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-200/50">
         <button
-          onClick={handleRepolish}
-          disabled={isLoading || !editableText.trim()}
-          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          onClick={handleTranslate}
+          disabled={isLoading || !result?.polishedText}
+          className="px-4 py-2 text-sm font-medium text-blue-700 bg-white border border-blue-300 rounded-lg hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          다시 다듬기
+          번역
         </button>
         <button
           onClick={handleSaveAsPostIt}

@@ -7,7 +7,8 @@ interface UsePolishReturn {
     text: string,
     context: PolishContext,
     channel: PolishChannel,
-    options: PolishOption[]
+    options: PolishOption[],
+    model?: string
   ) => Promise<PolishResponse>;
   isLoading: boolean;
   error: string | null;
@@ -25,7 +26,8 @@ export function usePolish(): UsePolishReturn {
       text: string,
       context: PolishContext,
       channel: PolishChannel,
-      options: PolishOption[]
+      options: PolishOption[],
+      model?: string
     ): Promise<PolishResponse> => {
       setIsLoading(true);
       setError(null);
@@ -36,6 +38,7 @@ export function usePolish(): UsePolishReturn {
           context,
           channel,
           options,
+          model,
         });
 
         setResult(response);

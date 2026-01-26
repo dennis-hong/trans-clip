@@ -2,6 +2,7 @@ import { useEffect, useCallback, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useClipboardStore } from "@/store";
+import { CLAUDE_MODELS, type ClaudeModel } from "@/types";
 
 interface TranslationPopupProps {
   sourceText: string;
@@ -16,6 +17,7 @@ export function TranslationPopup({
   const { createItem } = useClipboardStore();
   const [editableText, setEditableText] = useState(sourceText);
   const [isSaved, setIsSaved] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<ClaudeModel | undefined>(undefined);
 
   // Sync editableText when sourceText changes
   useEffect(() => {
@@ -75,9 +77,9 @@ export function TranslationPopup({
 
   const handleRetranslate = useCallback(() => {
     if (editableText.trim()) {
-      translate(editableText);
+      translate(editableText, selectedModel);
     }
-  }, [editableText, translate]);
+  }, [editableText, selectedModel, translate]);
 
   const handleSaveAsPostIt = useCallback(async () => {
     if (result?.translatedText) {
@@ -241,13 +243,29 @@ export function TranslationPopup({
 
       {/* Footer - 액션 버튼 */}
       <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-200/50">
-        <button
-          onClick={handleRetranslate}
-          disabled={isLoading || !editableText.trim()}
-          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          다시 번역
-        </button>
+        {/* Model selector + Retranslate button group */}
+        <div className="flex items-center gap-2 mr-auto">
+          <label className="text-[10px] text-gray-500">모델</label>
+          <select
+            value={selectedModel ?? ""}
+            onChange={(e) => setSelectedModel(e.target.value ? e.target.value as ClaudeModel : undefined)}
+            className="px-2 py-1 text-xs bg-white border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          >
+            <option value="">기본값</option>
+            {CLAUDE_MODELS.map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.name} ({model.description})
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={handleRetranslate}
+            disabled={isLoading || !editableText.trim()}
+            className="px-3 py-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-300 rounded-md hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            다시 번역
+          </button>
+        </div>
         <button
           onClick={handleSaveAsPostIt}
           disabled={isLoading || !result?.translatedText || isSaved}
