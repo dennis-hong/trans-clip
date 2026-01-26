@@ -239,6 +239,7 @@ impl ClipboardMonitor {
                 is_pinned: 0,
                 character_count: Some(char_count),
                 word_count: Some(word_count),
+                updated_at: None,
             };
 
             db.insert_clipboard_item(&item_row)

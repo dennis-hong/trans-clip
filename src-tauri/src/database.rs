@@ -149,6 +149,11 @@ impl Database {
             .execute(&self.pool)
             .await;
 
+        // Migration: add updated_at column to clipboard_items if it doesn't exist
+        let _ = sqlx::query("ALTER TABLE clipboard_items ADD COLUMN updated_at DATETIME")
+            .execute(&self.pool)
+            .await;
+
         // Create monitor_window_sizes table for per-monitor adaptive window sizing
         sqlx::query(
             r#"
@@ -192,7 +197,7 @@ impl Database {
             let search_pattern = format!("%{}%", query);
             sqlx::query_as::<_, ClipboardItemRow>(
                 r#"
-                SELECT id, content, content_preview, copied_at, source_app, is_pinned, character_count, word_count
+                SELECT id, content, content_preview, copied_at, source_app, is_pinned, character_count, word_count, updated_at
                 FROM clipboard_items
                 WHERE content LIKE ?
                 ORDER BY is_pinned DESC, copied_at DESC
@@ -207,7 +212,7 @@ impl Database {
         } else {
             sqlx::query_as::<_, ClipboardItemRow>(
                 r#"
-                SELECT id, content, content_preview, copied_at, source_app, is_pinned, character_count, word_count
+                SELECT id, content, content_preview, copied_at, source_app, is_pinned, character_count, word_count, updated_at
                 FROM clipboard_items
                 ORDER BY is_pinned DESC, copied_at DESC
                 LIMIT ? OFFSET ?
@@ -327,6 +332,83 @@ impl Database {
             .await?;
 
         Ok(())
+    }
+
+    /// Create a new clipboard item (for manual creation)
+    pub async fn create_clipboard_item(
+        &self,
+        id: &str,
+        content: &str,
+        content_preview: &str,
+        character_count: i32,
+        word_count: i32,
+    ) -> Result<ClipboardItemRow, sqlx::Error> {
+        let now = chrono::Utc::now().to_rfc3339();
+
+        sqlx::query(
+            r#"
+            INSERT INTO clipboard_items (id, content, content_preview, copied_at, source_app, is_pinned, character_count, word_count, updated_at)
+            VALUES (?, ?, ?, ?, NULL, 0, ?, ?, NULL)
+            "#,
+        )
+        .bind(id)
+        .bind(content)
+        .bind(content_preview)
+        .bind(&now)
+        .bind(character_count)
+        .bind(word_count)
+        .execute(&self.pool)
+        .await?;
+
+        // Return the created item
+        self.get_clipboard_item_by_id(id).await?.ok_or_else(|| {
+            sqlx::Error::RowNotFound
+        })
+    }
+
+    /// Update the content of an existing clipboard item
+    pub async fn update_clipboard_item_content(
+        &self,
+        id: &str,
+        content: &str,
+        content_preview: &str,
+        character_count: i32,
+        word_count: i32,
+    ) -> Result<Option<ClipboardItemRow>, sqlx::Error> {
+        let result = sqlx::query(
+            r#"
+            UPDATE clipboard_items
+            SET content = ?, content_preview = ?, character_count = ?, word_count = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            "#,
+        )
+        .bind(content)
+        .bind(content_preview)
+        .bind(character_count)
+        .bind(word_count)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        if result.rows_affected() > 0 {
+            self.get_clipboard_item_by_id(id).await
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Get a single clipboard item by ID
+    pub async fn get_clipboard_item_by_id(&self, id: &str) -> Result<Option<ClipboardItemRow>, sqlx::Error> {
+        sqlx::query_as::<_, ClipboardItemRow>(
+            r#"
+            SELECT id, content, content_preview, copied_at, source_app, is_pinned, character_count, word_count, updated_at
+            FROM clipboard_items
+            WHERE id = ?
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
     }
 
     // ============================================
@@ -745,6 +827,7 @@ pub struct ClipboardItemRow {
     pub is_pinned: i32,
     pub character_count: Option<i32>,
     pub word_count: Option<i32>,
+    pub updated_at: Option<String>,
 }
 
 #[derive(Debug, sqlx::FromRow)]

@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useClipboardStore } from "@/store";
 
 interface TranslationPopupProps {
   sourceText: string;
@@ -12,7 +13,9 @@ export function TranslationPopup({
   onClose,
 }: TranslationPopupProps) {
   const { translate, isLoading, error, result } = useTranslation();
+  const { createItem } = useClipboardStore();
   const [editableText, setEditableText] = useState(sourceText);
+  const [isSaved, setIsSaved] = useState(false);
 
   // Sync editableText when sourceText changes
   useEffect(() => {
@@ -75,6 +78,17 @@ export function TranslationPopup({
       translate(editableText);
     }
   }, [editableText, translate]);
+
+  const handleSaveAsPostIt = useCallback(async () => {
+    if (result?.translatedText) {
+      const newItem = await createItem(result.translatedText);
+      if (newItem) {
+        setIsSaved(true);
+        // Reset saved state after 2 seconds
+        setTimeout(() => setIsSaved(false), 2000);
+      }
+    }
+  }, [result?.translatedText, createItem]);
 
   // Check if source text has been modified
   const isSourceModified = editableText !== sourceText;
@@ -233,6 +247,17 @@ export function TranslationPopup({
           className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           다시 번역
+        </button>
+        <button
+          onClick={handleSaveAsPostIt}
+          disabled={isLoading || !result?.translatedText || isSaved}
+          className={`px-4 py-2 text-sm font-medium border rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+            isSaved
+              ? "text-green-700 bg-green-50 border-green-300"
+              : "text-amber-700 bg-white border-amber-300 hover:bg-amber-50"
+          }`}
+        >
+          {isSaved ? "저장됨!" : "메모로 저장"}
         </button>
         <button
           onClick={handleCopy}

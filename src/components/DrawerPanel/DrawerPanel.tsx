@@ -5,6 +5,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Event as TauriEvent } from "@tauri-apps/api/event";
 import { useClipboardStore } from "@/store";
 import { PostItCard } from "./PostItCard";
+import { PostItEditor } from "./PostItEditor";
+import { CreatePostItCard } from "./CreatePostItCard";
 import { Toast } from "@/components/common";
 import { SettingsPanel } from "@/components/Settings/SettingsPanel";
 import { GlossaryList } from "@/components/GlossaryManager/GlossaryList";
@@ -68,11 +70,13 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
   const [currentMonitor, setCurrentMonitor] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<ClipboardItem | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastSavedWidthRef = useRef<number>(0);
   const resizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { items, isLoading, fetchHistory, deleteItem, togglePin } = useClipboardStore();
+  const { items, isLoading, fetchHistory, deleteItem, togglePin, createItem, updateItemContent } = useClipboardStore();
 
   // Fetch history on mount
   useEffect(() => {
@@ -157,10 +161,21 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
   // and quick selection (number keys 1-9) and ESC to close
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
+      // Don't handle shortcuts when editor is open
+      if (isEditorOpen) return;
+
       // ESC key - close the panel (in stealth mode)
       if (e.key === "Escape" && isStealthMode && onClose) {
         e.preventDefault();
         onClose();
+        return;
+      }
+
+      // Cmd+N - create new post-it (only in history view)
+      if (e.key === "n" && e.metaKey && !e.altKey && !e.ctrlKey && !e.shiftKey && currentView === "history") {
+        e.preventDefault();
+        setEditingItem(null);
+        setIsEditorOpen(true);
         return;
       }
 
@@ -274,7 +289,7 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [monitors.length, currentView, items, isStealthMode, onClose, onTranslate, onPolish]);
+  }, [monitors.length, currentView, items, isStealthMode, onClose, onTranslate, onPolish, isEditorOpen]);
 
   const loadMonitors = async () => {
     try {
@@ -372,6 +387,43 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
       onPolish(item.content);
     }
   }, [onPolish]);
+
+  const handleEditItem = useCallback((item: ClipboardItem) => {
+    setEditingItem(item);
+    setIsEditorOpen(true);
+  }, []);
+
+  const handleCreateNewItem = useCallback(() => {
+    setEditingItem(null);
+    setIsEditorOpen(true);
+  }, []);
+
+  const handleEditorSave = useCallback(async (content: string) => {
+    if (editingItem) {
+      // Edit existing item
+      const success = await updateItemContent(editingItem.id, content);
+      if (success) {
+        setToast({ message: "수정되었습니다", type: "success" });
+      } else {
+        setToast({ message: "수정 실패", type: "error" });
+      }
+    } else {
+      // Create new item
+      const newItem = await createItem(content);
+      if (newItem) {
+        setToast({ message: "메모가 생성되었습니다", type: "success" });
+      } else {
+        setToast({ message: "생성 실패", type: "error" });
+      }
+    }
+    setIsEditorOpen(false);
+    setEditingItem(null);
+  }, [editingItem, updateItemContent, createItem]);
+
+  const handleEditorClose = useCallback(() => {
+    setIsEditorOpen(false);
+    setEditingItem(null);
+  }, []);
 
   const handleMoveToMonitor = async (index: number) => {
     try {
@@ -719,12 +771,15 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
                 scrollbarColor: "rgba(156, 163, 175, 0.5) transparent",
               }}
             >
+              {/* Create new post-it card - always shown first */}
+              <CreatePostItCard onClick={handleCreateNewItem} />
+
               {isLoading && items.length === 0 ? (
                 <div className="flex items-center justify-center w-full py-8">
                   <div className="animate-spin w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full" />
                 </div>
               ) : items.length === 0 ? (
-                <div className="flex flex-col items-center justify-center w-full py-8 text-center">
+                <div className="flex flex-col items-center justify-center flex-1 py-8 text-center">
                   <svg
                     className="w-12 h-12 text-gray-300"
                     fill="none"
@@ -739,7 +794,7 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
                     />
                   </svg>
                   <p className="mt-2 text-sm text-gray-500">
-                    {searchQuery ? "검색 결과가 없습니다" : "클립보드 히스토리가 비어있습니다"}
+                    {searchQuery ? "검색 결과가 없습니다" : "새 메모를 만들어보세요"}
                   </p>
                 </div>
               ) : (
@@ -754,6 +809,7 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
                     onTogglePin={handleTogglePin}
                     onTranslate={onTranslate ? handleTranslateItem : undefined}
                     onPolish={onPolish ? handlePolishItem : undefined}
+                    onEdit={handleEditItem}
                     showPasteButton={isStealthMode}
                   />
                 ))
@@ -773,6 +829,17 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
             </div>
           )}
         </div>
+      )}
+
+      {/* Post-it Editor Modal */}
+      {isEditorOpen && (
+        <PostItEditor
+          mode={editingItem ? "edit" : "create"}
+          initialContent={editingItem?.content ?? ""}
+          itemId={editingItem?.id}
+          onSave={handleEditorSave}
+          onClose={handleEditorClose}
+        />
       )}
     </div>
   );

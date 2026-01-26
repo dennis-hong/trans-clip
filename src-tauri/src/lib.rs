@@ -3,6 +3,7 @@ mod commands;
 mod database;
 mod hotkey;
 mod keychain;
+mod prompts;
 
 use database::Database;
 use std::sync::Arc;
@@ -153,6 +154,8 @@ pub fn run() {
             commands::delete_clipboard_item,
             commands::clear_clipboard_history,
             commands::toggle_pin_clipboard_item,
+            commands::create_clipboard_item,
+            commands::update_clipboard_item,
             commands::set_clipboard,
             commands::paste_text,
             // Glossary commands

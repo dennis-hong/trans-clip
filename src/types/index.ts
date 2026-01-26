@@ -16,6 +16,7 @@ export interface ClipboardItem {
     characterCount: number;
     wordCount: number;
   };
+  updatedAt?: string; // 편집된 경우에만 값 존재
 }
 
 /**

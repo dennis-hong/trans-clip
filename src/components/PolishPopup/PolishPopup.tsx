@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { usePolish } from "@/hooks/usePolish";
 import {
   usePolishStore,
+  useClipboardStore,
   POLISH_CONTEXTS,
   POLISH_CHANNELS,
   POLISH_OPTIONS,
@@ -16,7 +17,9 @@ interface PolishPopupProps {
 
 export function PolishPopup({ sourceText, onClose }: PolishPopupProps) {
   const { polish, isLoading, error, result } = usePolish();
+  const { createItem } = useClipboardStore();
   const [editableText, setEditableText] = useState(sourceText);
+  const [isSaved, setIsSaved] = useState(false);
   const isInitialMount = useRef(true);
 
   // Sync editableText when sourceText changes
@@ -95,6 +98,17 @@ export function PolishPopup({ sourceText, onClose }: PolishPopupProps) {
       polish(editableText, lastContext, lastChannel, lastOptions);
     }
   }, [editableText, lastContext, lastChannel, lastOptions, polish]);
+
+  const handleSaveAsPostIt = useCallback(async () => {
+    if (result?.polishedText) {
+      const newItem = await createItem(result.polishedText);
+      if (newItem) {
+        setIsSaved(true);
+        // Reset saved state after 2 seconds
+        setTimeout(() => setIsSaved(false), 2000);
+      }
+    }
+  }, [result?.polishedText, createItem]);
 
   // Check if source text has been modified
   const isSourceModified = editableText !== sourceText;
@@ -305,6 +319,17 @@ export function PolishPopup({ sourceText, onClose }: PolishPopupProps) {
           className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           다시 다듬기
+        </button>
+        <button
+          onClick={handleSaveAsPostIt}
+          disabled={isLoading || !result?.polishedText || isSaved}
+          className={`px-4 py-2 text-sm font-medium border rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+            isSaved
+              ? "text-green-700 bg-green-50 border-green-300"
+              : "text-amber-700 bg-white border-amber-300 hover:bg-amber-50"
+          }`}
+        >
+          {isSaved ? "저장됨!" : "메모로 저장"}
         </button>
         <button
           onClick={handleCopy}

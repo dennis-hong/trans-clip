@@ -25,6 +25,8 @@ interface ClipboardStore {
   clearAll: () => Promise<boolean>;
   togglePin: (id: string) => Promise<boolean>;
   addItem: (item: ClipboardItem) => void;
+  createItem: (content: string) => Promise<ClipboardItem | null>;
+  updateItemContent: (id: string, content: string) => Promise<boolean>;
   clearError: () => void;
 }
 
@@ -160,6 +162,50 @@ export const useClipboardStore = create<ClipboardStore>((set) => ({
 
       return { items: [item, ...state.items], total: state.total + 1 };
     });
+  },
+
+  createItem: async (content: string) => {
+    try {
+      const response = await invoke<ClipboardItem>("create_clipboard_item", {
+        content,
+      });
+
+      // Add to the top of the list
+      set((state) => ({
+        items: [response, ...state.items],
+        total: state.total + 1,
+      }));
+
+      return response;
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  },
+
+  updateItemContent: async (id: string, content: string) => {
+    try {
+      const response = await invoke<ClipboardItem>("update_clipboard_item", {
+        id,
+        content,
+      });
+
+      // Update the item in the list
+      set((state) => ({
+        items: state.items.map((item) =>
+          item.id === id ? response : item
+        ),
+      }));
+
+      return true;
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
   },
 
   clearError: () => set({ error: null }),

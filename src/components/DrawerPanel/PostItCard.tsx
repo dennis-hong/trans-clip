@@ -11,6 +11,7 @@ interface PostItCardProps {
   onTogglePin: (id: string) => void;
   onTranslate?: (item: ClipboardItem) => void;
   onPolish?: (item: ClipboardItem) => void;
+  onEdit?: (item: ClipboardItem) => void;
   showPasteButton?: boolean;
 }
 
@@ -32,7 +33,7 @@ function getColorFromId(id: string): string {
   return COLORS[colorIndex] || "bg-yellow-100 border-yellow-300";
 }
 
-export function PostItCard({ item, index, color, onCopy, onPaste, onDelete, onTogglePin, onTranslate, onPolish, showPasteButton }: PostItCardProps) {
+export function PostItCard({ item, index, color, onCopy, onPaste, onDelete, onTogglePin, onTranslate, onPolish, onEdit, showPasteButton }: PostItCardProps) {
   const [isHovered, setIsHovered] = useState(false);
   const cardColor = color || getColorFromId(item.id);
 
@@ -86,6 +87,26 @@ export function PostItCard({ item, index, color, onCopy, onPaste, onDelete, onTo
     [item, onPolish]
   );
 
+  const handleEdit = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (onEdit) {
+        onEdit(item);
+      }
+    },
+    [item, onEdit]
+  );
+
+  const handleDoubleClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (onEdit) {
+        onEdit(item);
+      }
+    },
+    [item, onEdit]
+  );
+
   const formatTime = (dateStr: string) => {
     const date = new Date(dateStr);
     const now = new Date();
@@ -110,6 +131,7 @@ export function PostItCard({ item, index, color, onCopy, onPaste, onDelete, onTo
   return (
     <div
       onClick={handleCopy}
+      onDoubleClick={handleDoubleClick}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       className={`
@@ -174,6 +196,11 @@ export function PostItCard({ item, index, color, onCopy, onPaste, onDelete, onTo
         <span className="text-[10px] text-gray-500">
           {formatTime(item.copiedAt)}
           {item.metadata && ` · ${item.metadata.characterCount}자`}
+          {item.updatedAt && (
+            <span className="ml-1 text-amber-600" title={`편집됨: ${item.updatedAt}`}>
+              (편집됨)
+            </span>
+          )}
         </span>
 
         {/* Action buttons - visible on hover */}
@@ -212,6 +239,23 @@ export function PostItCard({ item, index, color, onCopy, onPaste, onDelete, onTo
                   strokeLinejoin="round"
                   strokeWidth={2}
                   d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                />
+              </svg>
+            </button>
+          )}
+          {/* Edit button */}
+          {onEdit && (
+            <button
+              onClick={handleEdit}
+              className="p-1 rounded hover:bg-black/10 transition-colors"
+              title="편집"
+            >
+              <svg className="w-3.5 h-3.5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
                 />
               </svg>
             </button>

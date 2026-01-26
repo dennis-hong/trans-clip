@@ -1,5 +1,6 @@
 use crate::database::{ClipboardItemRow, GlossaryEntryRow, TranslationRow, UserSettingsRow};
 use crate::keychain;
+use crate::prompts;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -155,6 +156,7 @@ pub struct ClipboardItemResponse {
     pub source_app: Option<String>,
     pub is_pinned: bool,
     pub metadata: Option<ClipboardMetadata>,
+    pub updated_at: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -301,6 +303,7 @@ impl From<ClipboardItemRow> for ClipboardItemResponse {
                 }),
                 _ => None,
             },
+            updated_at: row.updated_at,
         }
     }
 }
@@ -667,75 +670,19 @@ pub async fn polish(
     // Detect language
     let detected_lang = detect_language(&text);
 
-    // Build context description
-    let context_desc = match context.as_str() {
-        "report-to-superior" => "상사나 임원에게 보고하는 상황입니다. 존댓말을 사용하고, 핵심을 먼저 말하며, 결론-근거 순서로 명확하게 작성해주세요.",
-        "team-announcement" => "팀원들에게 전달하는 공지 상황입니다. 친근하면서도 명확하게, 불릿포인트로 정리하고 행동 요청을 명시해주세요.",
-        "peer-discussion" => "동료와 논의하는 상황입니다. 편하게 작성하되 논의 포인트를 정리하고 질문을 명확히 해주세요.",
-        "external-formal" => "파트너사나 고객사 등 외부와 소통하는 상황입니다. 격식체로 정중하게, 배경-목적-요청 구조로 작성해주세요.",
-        "documentation" => "기술 문서나 가이드를 작성하는 상황입니다. 객관적이고 3인칭으로, 단계별로 명료하게 설명해주세요.",
-        _ => "일반적인 업무 커뮤니케이션 상황입니다.",
-    };
-
-    // Build channel description
-    let channel_desc = match channel.as_str() {
-        "slack-message" => "슬랙 메시지입니다. 짧고 간결하게, 한눈에 파악할 수 있게 작성해주세요. 적절한 이모지 사용 가능합니다.",
-        "slack-thread" => "슬랙 스레드 답글입니다. 컨텍스트를 유지하면서 약간 더 상세하게 작성해주세요.",
-        "confluence-wiki" => "컨플루언스 위키 문서입니다. 헤딩과 불릿으로 구조화하고, 완전한 문장으로 작성해주세요.",
-        "jira-comment" => "Jira 이슈 코멘트입니다. 간결하게, 결론과 액션 중심으로 작성해주세요.",
-        "jira-description" => "Jira 이슈 설명입니다. 배경-목표-상세-AC(수락 기준) 구조로 작성해주세요.",
-        "email" => "업무 이메일입니다. 인사-본문-마무리 구조로, 요청사항을 명확히 해주세요.",
-        "pr-description" => "GitHub/GitLab PR 설명입니다. What-Why-How 구조로 변경사항을 요약해주세요.",
-        "code-review" => "코드 리뷰 코멘트입니다. 건설적으로, 구체적인 제안을 포함해주세요.",
-        _ => "일반적인 텍스트 형식입니다.",
-    };
-
-    // Build options description
-    let mut options_desc = String::new();
-    for opt in &options {
-        let opt_text = match opt.as_str() {
-            "shorter" => "더 짧게: 핵심만 남기고 불필요한 부분을 제거해주세요.",
-            "longer" => "더 자세하게: 부연 설명과 맥락을 추가해주세요.",
-            "bullet" => "불릿으로 정리: 나열된 내용을 불릿포인트로 구조화해주세요.",
-            "formal" => "더 격식있게: 톤을 높여 공식적으로 작성해주세요.",
-            "casual" => "더 캐주얼하게: 톤을 낮춰 편하게 작성해주세요.",
-            "action-clear" => "액션 명확히: 요청사항이나 다음 단계를 명확하게 표현해주세요.",
-            _ => "",
-        };
-        if !opt_text.is_empty() {
-            options_desc.push_str("\n- ");
-            options_desc.push_str(opt_text);
-        }
-    }
-
-    let lang_instruction = if detected_lang == "ko" {
-        "한국어로 다듬어주세요."
+    // Build prompts using the prompts module
+    let system_prompt = if detected_lang == "ko" {
+        prompts::polish::build_system_prompt()
     } else {
-        "Refine in English."
+        prompts::polish::build_system_prompt_english()
     };
 
-    let prompt = format!(
-        r#"당신은 전문 에디터입니다. 사용자가 빠르게 작성한 러프한 초안을 깔끔하고 명료하게 정돈해주세요.
-
-**중요**: 내용을 바꾸거나 새로운 정보를 추가하지 말고, 원본의 의미를 유지하면서 전달력이 좋게 다듬어주세요.
-
-## 상황
-{context_desc}
-
-## 채널/매체
-{channel_desc}
-{options_section}
-## 원문
-{text}
-
-## 지시사항
-{lang_instruction}
-다듬어진 결과만 출력하세요. 설명이나 추가 코멘트는 포함하지 마세요."#,
-        context_desc = context_desc,
-        channel_desc = channel_desc,
-        options_section = if options_desc.is_empty() { String::new() } else { format!("\n## 추가 요청사항{}", options_desc) },
-        text = text,
-        lang_instruction = lang_instruction,
+    let user_prompt = prompts::polish::build_user_prompt(
+        &text,
+        &context,
+        &channel,
+        &options,
+        &detected_lang,
     );
 
     // Call Claude API
@@ -748,7 +695,8 @@ pub async fn polish(
         .json(&serde_json::json!({
             "model": settings.preferred_model,
             "max_tokens": 4096,
-            "messages": [{"role": "user", "content": prompt}]
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": user_prompt}]
         }))
         .send()
         .await;
@@ -923,6 +871,80 @@ pub async fn clear_clipboard_history(
         deleted_count,
         error: None,
     })
+}
+
+/// Create a new clipboard item manually (not from clipboard)
+#[tauri::command]
+pub async fn create_clipboard_item(
+    state: State<'_, AppState>,
+    content: String,
+) -> Result<ClipboardItemResponse, String> {
+    // Validation
+    if content.is_empty() {
+        return Err("Content cannot be empty".to_string());
+    }
+
+    if content.len() > 50000 {
+        return Err("Content is too long (max 50000 characters)".to_string());
+    }
+
+    // Generate content preview (first 100 chars)
+    let content_preview = if content.len() > 100 {
+        format!("{}...", &content[..100])
+    } else {
+        content.clone()
+    };
+
+    // Calculate metadata
+    let character_count = content.chars().count() as i32;
+    let word_count = content.split_whitespace().count() as i32;
+
+    let id = uuid::Uuid::new_v4().to_string();
+
+    let db = state.db.lock().await;
+    let item = db
+        .create_clipboard_item(&id, &content, &content_preview, character_count, word_count)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(ClipboardItemResponse::from(item))
+}
+
+/// Update the content of an existing clipboard item
+#[tauri::command]
+pub async fn update_clipboard_item(
+    state: State<'_, AppState>,
+    id: String,
+    content: String,
+) -> Result<ClipboardItemResponse, String> {
+    // Validation
+    if content.is_empty() {
+        return Err("Content cannot be empty".to_string());
+    }
+
+    if content.len() > 50000 {
+        return Err("Content is too long (max 50000 characters)".to_string());
+    }
+
+    // Generate content preview (first 100 chars)
+    let content_preview = if content.len() > 100 {
+        format!("{}...", &content[..100])
+    } else {
+        content.clone()
+    };
+
+    // Calculate metadata
+    let character_count = content.chars().count() as i32;
+    let word_count = content.split_whitespace().count() as i32;
+
+    let db = state.db.lock().await;
+    let item = db
+        .update_clipboard_item_content(&id, &content, &content_preview, character_count, word_count)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    item.map(ClipboardItemResponse::from)
+        .ok_or_else(|| "Clipboard item not found".to_string())
 }
 
 #[tauri::command]
