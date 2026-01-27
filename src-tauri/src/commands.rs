@@ -1484,14 +1484,17 @@ pub async fn set_clipboard(text: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         use std::process::Command;
+        use std::io::Write;
+
         let mut child = Command::new("pbcopy")
             .stdin(std::process::Stdio::piped())
             .spawn()
             .map_err(|e| e.to_string())?;
 
-        if let Some(stdin) = child.stdin.as_mut() {
-            use std::io::Write;
+        // take()로 소유권을 가져와서 스코프 끝에서 자동으로 drop되어 EOF 전송
+        if let Some(mut stdin) = child.stdin.take() {
             stdin.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
+            // stdin이 여기서 drop되어 pbcopy에 EOF 신호 전송
         }
 
         child.wait().map_err(|e| e.to_string())?;
