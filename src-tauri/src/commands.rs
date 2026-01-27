@@ -1487,6 +1487,8 @@ pub async fn set_clipboard(text: String) -> Result<(), String> {
         use std::io::Write;
 
         let mut child = Command::new("pbcopy")
+            .env("LANG", "en_US.UTF-8")
+            .env("LC_ALL", "en_US.UTF-8")
             .stdin(std::process::Stdio::piped())
             .spawn()
             .map_err(|e| e.to_string())?;
@@ -2355,9 +2357,9 @@ pub async fn get_current_monitor_info(
         }
     }
     
-    let (monitor_index, monitor) = found_monitor.unwrap_or_else(|| {
-        (0, sorted_monitors.first().map(|(_, m)| *m).unwrap())
-    });
+    let (monitor_index, monitor) = found_monitor
+        .or_else(|| sorted_monitors.first().map(|(_, m)| (0, *m)))
+        .ok_or("No monitors available")?;
     
     let mon_size = monitor.size();
     let scale = monitor.scale_factor();
@@ -2403,7 +2405,10 @@ pub async fn save_window_width_for_monitor(
         }
     }
     
-    let monitor = found_monitor.unwrap_or_else(|| monitors.first().unwrap());
+    let monitor = match found_monitor {
+        Some(m) => m,
+        None => monitors.first().ok_or("No monitors available")?,
+    };
     let mon_size = monitor.size();
     let scale = monitor.scale_factor();
     let monitor_key = generate_monitor_key(mon_size.width, mon_size.height, scale);
