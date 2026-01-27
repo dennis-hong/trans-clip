@@ -188,6 +188,7 @@ pub fn run() {
             commands::move_to_monitor,
             commands::toggle_always_on_top,
             commands::snap_to_bottom,
+            commands::snap_to_edge,
             commands::set_drawer_collapsed,
             commands::set_drawer_mode,
             commands::get_current_monitor_info,

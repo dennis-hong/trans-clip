@@ -1999,6 +1999,23 @@ pub struct WindowPosition {
     pub height: u32,
 }
 
+#[derive(Debug, Serialize, Clone, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SnapEdge {
+    Top,
+    Bottom,
+    Left,
+    Right,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapResult {
+    pub snapped: bool,
+    pub edges: Vec<SnapEdge>,
+    pub position: WindowPosition,
+}
+
 #[tauri::command]
 pub async fn get_monitors(app: tauri::AppHandle) -> Result<Vec<MonitorInfo>, String> {
     let monitors = app.available_monitors().map_err(|e| e.to_string())?;
@@ -2464,12 +2481,146 @@ pub async fn snap_to_bottom(app: tauri::AppHandle) -> Result<(), String> {
     // Keep x position, snap y to bottom (using logical coordinates)
     let new_y = mon_pos.y + mon_logical_height - win_logical_height;
     
-    window.set_position(tauri::Position::Logical(tauri::LogicalPosition { 
-        x: win_logical_x as f64, 
-        y: new_y as f64 
+    window.set_position(tauri::Position::Logical(tauri::LogicalPosition {
+        x: win_logical_x as f64,
+        y: new_y as f64
     })).map_err(|e| e.to_string())?;
-    
+
     Ok(())
+}
+
+#[tauri::command]
+pub async fn snap_to_edge(app: tauri::AppHandle, threshold: i32) -> Result<SnapResult, String> {
+    let window = app.get_webview_window("main").ok_or("Window not found")?;
+    let win_pos = window.outer_position().map_err(|e| e.to_string())?;
+    let win_size = window.outer_size().map_err(|e| e.to_string())?;
+
+    // Find which monitor the window is on
+    let monitors = app.available_monitors().map_err(|e| e.to_string())?;
+
+    // Sort monitors by position (left to right) for consistent indexing
+    let mut sorted_monitors: Vec<_> = monitors.iter().enumerate().collect();
+    sorted_monitors.sort_by(|(_, a), (_, b)| {
+        let pos_a = a.position();
+        let pos_b = b.position();
+        match pos_a.x.cmp(&pos_b.x) {
+            std::cmp::Ordering::Equal => pos_a.y.cmp(&pos_b.y),
+            other => other,
+        }
+    });
+
+    let mut target_monitor = sorted_monitors.first().map(|(_, m)| *m).ok_or("No monitors found")?;
+    let mut found_index = 0usize;
+
+    // Determine which monitor the window is on based on window center
+    for (sorted_index, (_, monitor)) in sorted_monitors.iter().enumerate() {
+        let mon_pos = monitor.position();
+        let mon_size = monitor.size();
+        let scale = monitor.scale_factor();
+
+        // Convert to logical coordinates for comparison
+        let mon_logical_width = (mon_size.width as f64 / scale) as i32;
+        let mon_logical_height = (mon_size.height as f64 / scale) as i32;
+
+        // win_pos is in physical pixels, convert to logical
+        let win_logical_x = (win_pos.x as f64 / scale) as i32;
+        let win_logical_y = (win_pos.y as f64 / scale) as i32;
+        let win_logical_width = (win_size.width as f64 / scale) as i32;
+        let win_logical_height = (win_size.height as f64 / scale) as i32;
+
+        let win_center_x = win_logical_x + win_logical_width / 2;
+        let win_center_y = win_logical_y + win_logical_height / 2;
+
+        if win_center_x >= mon_pos.x && win_center_x < mon_pos.x + mon_logical_width &&
+           win_center_y >= mon_pos.y && win_center_y < mon_pos.y + mon_logical_height {
+            target_monitor = *monitor;
+            found_index = sorted_index;
+            break;
+        }
+    }
+
+    // Update the saved monitor index
+    LAST_MONITOR_INDEX.store(found_index, Ordering::SeqCst);
+    log::info!("snap_to_edge: updated LAST_MONITOR_INDEX={}", found_index);
+
+    let mon_pos = target_monitor.position();
+    let mon_size = target_monitor.size();
+    let scale = target_monitor.scale_factor();
+
+    // Convert all measurements to logical coordinates
+    let mon_logical_width = (mon_size.width as f64 / scale) as i32;
+    let mon_logical_height = (mon_size.height as f64 / scale) as i32;
+    let win_logical_x = (win_pos.x as f64 / scale) as i32;
+    let win_logical_y = (win_pos.y as f64 / scale) as i32;
+    let win_logical_width = (win_size.width as f64 / scale) as i32;
+    let win_logical_height = (win_size.height as f64 / scale) as i32;
+
+    // Calculate work area (excluding menu bar and dock on macOS)
+    // Menu bar is typically 25 pixels, dock is typically 70 pixels at bottom
+    #[cfg(target_os = "macos")]
+    let (work_top, work_bottom) = {
+        let menu_bar_height = 25;
+        let dock_height = 70; // Approximate dock height when visible at bottom
+        (mon_pos.y + menu_bar_height, mon_pos.y + mon_logical_height - dock_height)
+    };
+
+    #[cfg(not(target_os = "macos"))]
+    let (work_top, work_bottom) = (mon_pos.y, mon_pos.y + mon_logical_height);
+
+    let work_left = mon_pos.x;
+    let work_right = mon_pos.x + mon_logical_width;
+
+    // Calculate distances to each edge
+    let dist_to_top = win_logical_y - work_top;
+    let dist_to_bottom = work_bottom - (win_logical_y + win_logical_height);
+    let dist_to_left = win_logical_x - work_left;
+    let dist_to_right = work_right - (win_logical_x + win_logical_width);
+
+    let mut snapped_edges: Vec<SnapEdge> = Vec::new();
+    let mut new_x = win_logical_x;
+    let mut new_y = win_logical_y;
+
+    // Check each edge and snap if within threshold
+    if dist_to_top.abs() <= threshold {
+        new_y = work_top;
+        snapped_edges.push(SnapEdge::Top);
+    } else if dist_to_bottom.abs() <= threshold {
+        new_y = work_bottom - win_logical_height;
+        snapped_edges.push(SnapEdge::Bottom);
+    }
+
+    if dist_to_left.abs() <= threshold {
+        new_x = work_left;
+        snapped_edges.push(SnapEdge::Left);
+    } else if dist_to_right.abs() <= threshold {
+        new_x = work_right - win_logical_width;
+        snapped_edges.push(SnapEdge::Right);
+    }
+
+    let snapped = !snapped_edges.is_empty();
+
+    // Apply new position if snapped
+    if snapped {
+        window.set_position(tauri::Position::Logical(tauri::LogicalPosition {
+            x: new_x as f64,
+            y: new_y as f64
+        })).map_err(|e| e.to_string())?;
+        log::info!("snap_to_edge: snapped to {:?} at ({}, {})", snapped_edges, new_x, new_y);
+    } else {
+        log::info!("snap_to_edge: no snap (distances: top={}, bottom={}, left={}, right={})",
+                   dist_to_top, dist_to_bottom, dist_to_left, dist_to_right);
+    }
+
+    Ok(SnapResult {
+        snapped,
+        edges: snapped_edges,
+        position: WindowPosition {
+            x: new_x,
+            y: new_y,
+            width: win_size.width,
+            height: win_size.height,
+        },
+    })
 }
 
 #[tauri::command]

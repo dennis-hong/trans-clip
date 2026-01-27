@@ -481,12 +481,13 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
       if (!isDragging) return;
 
       const deltaX = e.screenX - dragStart.x;
+      const deltaY = e.screenY - dragStart.y;
 
       try {
         const pos = await invoke<{ x: number; y: number }>("get_window_position");
         await invoke("set_window_position", {
           x: pos.x + deltaX,
-          y: pos.y, // Keep y position fixed
+          y: pos.y + deltaY,
         });
         setDragStart({ x: e.screenX, y: e.screenY });
       } catch (err) {
@@ -499,18 +500,18 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
   const handleDragEnd = useCallback(async () => {
     setIsDragging(false);
     try {
-      await invoke("snap_to_bottom");
+      await invoke("snap_to_edge", { threshold: 50 });
       // Update current monitor index after snapping
       const currentIdx = await invoke<number>("get_current_monitor_index");
       setCurrentMonitor(currentIdx);
-      
+
       // Update lastSavedWidthRef in case monitor changed
       const window = getCurrentWindow();
       const size = await window.outerSize();
       const scaleFactor = await window.scaleFactor();
       lastSavedWidthRef.current = Math.round(size.width / scaleFactor);
     } catch (err) {
-      console.error("Failed to snap to bottom:", err);
+      console.error("Failed to snap to edge:", err);
     }
   }, []);
 

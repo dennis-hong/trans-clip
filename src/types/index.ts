@@ -414,3 +414,26 @@ export interface AppError {
   code: ErrorCode;
   message: string;
 }
+
+// ============================================
+// Window Management Types
+// ============================================
+
+/**
+ * Edge to snap window to
+ */
+export type SnapEdge = "top" | "bottom" | "left" | "right";
+
+/**
+ * Result of snap_to_edge command
+ */
+export interface SnapResult {
+  snapped: boolean;
+  edges: SnapEdge[];
+  position: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+}
