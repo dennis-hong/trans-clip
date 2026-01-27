@@ -21,7 +21,7 @@ pub fn set_popup_position(_position: &str) {
 /// The window position is managed by set_drawer_mode which keeps it at bottom center
 pub fn show_window_at_position(window: &tauri::WebviewWindow) {
     // Update monitor index based on cursor position before showing
-    crate::commands::update_monitor_from_cursor(window.app_handle());
+    crate::commands::window::update_monitor_from_cursor(window.app_handle());
 
     // Just show and focus the window - position is handled by set_drawer_mode
     let _ = window.show();

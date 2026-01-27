@@ -4,6 +4,7 @@ mod database;
 mod hotkey;
 mod keychain;
 mod prompts;
+mod utils;
 
 use database::Database;
 use std::sync::Arc;
@@ -146,54 +147,54 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             // Translation commands
-            commands::translate,
-            commands::translate_stream,
+            commands::translate::translate,
+            commands::translate::translate_stream,
             // Polish commands
-            commands::polish,
-            commands::polish_stream,
+            commands::polish::polish,
+            commands::polish::polish_stream,
             // Clipboard commands
-            commands::get_clipboard_history,
-            commands::delete_clipboard_item,
-            commands::clear_clipboard_history,
-            commands::toggle_pin_clipboard_item,
-            commands::create_clipboard_item,
-            commands::update_clipboard_item,
-            commands::set_clipboard,
-            commands::paste_text,
+            commands::clipboard::get_clipboard_history,
+            commands::clipboard::delete_clipboard_item,
+            commands::clipboard::clear_clipboard_history,
+            commands::clipboard::toggle_pin_clipboard_item,
+            commands::clipboard::create_clipboard_item,
+            commands::clipboard::update_clipboard_item,
+            commands::clipboard::set_clipboard,
+            commands::clipboard::paste_text,
             // Glossary commands
-            commands::get_glossary_entries,
-            commands::add_glossary_entry,
-            commands::update_glossary_entry,
-            commands::delete_glossary_entry,
-            commands::import_glossary,
-            commands::export_glossary,
+            commands::glossary::get_glossary_entries,
+            commands::glossary::add_glossary_entry,
+            commands::glossary::update_glossary_entry,
+            commands::glossary::delete_glossary_entry,
+            commands::glossary::import_glossary,
+            commands::glossary::export_glossary,
             // Settings commands
-            commands::get_settings,
-            commands::update_settings,
-            commands::get_api_key,
-            commands::set_api_key,
-            commands::delete_api_key,
+            commands::settings::get_settings,
+            commands::settings::update_settings,
+            commands::settings::get_api_key,
+            commands::settings::set_api_key,
+            commands::settings::delete_api_key,
             // System commands
-            commands::check_accessibility_permission,
-            commands::request_accessibility_permission,
-            commands::open_accessibility_settings,
-            commands::show_translation_popup,
-            commands::hide_translation_popup,
+            commands::system::check_accessibility_permission,
+            commands::system::request_accessibility_permission,
+            commands::system::open_accessibility_settings,
+            commands::system::show_translation_popup,
+            commands::system::hide_translation_popup,
             // Window management commands
-            commands::get_monitors,
-            commands::get_current_monitor_index,
-            commands::get_window_position,
-            commands::set_window_position,
-            commands::set_window_size,
-            commands::move_to_monitor,
-            commands::toggle_always_on_top,
-            commands::snap_to_bottom,
-            commands::snap_to_edge,
-            commands::set_drawer_collapsed,
-            commands::set_drawer_mode,
-            commands::get_current_monitor_info,
-            commands::save_window_width_for_monitor,
-            commands::open_postit_editor,
+            commands::window::get_monitors,
+            commands::window::get_current_monitor_index,
+            commands::window::get_window_position,
+            commands::window::set_window_position,
+            commands::window::set_window_size,
+            commands::window::move_to_monitor,
+            commands::window::toggle_always_on_top,
+            commands::window::snap_to_bottom,
+            commands::window::snap_to_edge,
+            commands::window::set_drawer_collapsed,
+            commands::window::set_drawer_mode,
+            commands::window::get_current_monitor_info,
+            commands::window::save_window_width_for_monitor,
+            commands::window::open_postit_editor,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
