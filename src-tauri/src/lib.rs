@@ -193,6 +193,7 @@ pub fn run() {
             commands::set_drawer_mode,
             commands::get_current_monitor_info,
             commands::save_window_width_for_monitor,
+            commands::open_postit_editor,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

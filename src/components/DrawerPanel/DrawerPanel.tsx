@@ -5,7 +5,6 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Event as TauriEvent } from "@tauri-apps/api/event";
 import { useClipboardStore } from "@/store";
 import { PostItCard } from "./PostItCard";
-import { PostItEditor } from "./PostItEditor";
 import { CreatePostItCard } from "./CreatePostItCard";
 import { Toast } from "@/components/common";
 import { SettingsPanel } from "@/components/Settings/SettingsPanel";
@@ -70,19 +69,17 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
   const [currentMonitor, setCurrentMonitor] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [isEditorOpen, setIsEditorOpen] = useState(false);
-  const [editingItem, setEditingItem] = useState<ClipboardItem | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastSavedWidthRef = useRef<number>(0);
   const resizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { items, isLoading, fetchHistory, deleteItem, togglePin, createItem, updateItemContent } = useClipboardStore();
+  const { items, isLoading, fetchHistory, deleteItem, togglePin } = useClipboardStore();
 
   // Fetch history on mount
   useEffect(() => {
     fetchHistory();
     loadMonitors();
-    
+
     // Initialize lastSavedWidth with current window width
     const initWidth = async () => {
       try {
@@ -95,6 +92,20 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
       }
     };
     initWidth();
+  }, [fetchHistory]);
+
+  // Listen for postit_saved event from editor window
+  useEffect(() => {
+    const unlisten = listen<{ mode: string; itemId?: string }>("postit_saved", async (event) => {
+      // Refresh history when a postit is saved
+      await fetchHistory();
+      const message = event.payload.mode === "edit" ? "수정되었습니다" : "메모가 생성되었습니다";
+      setToast({ message, type: "success" });
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
   }, [fetchHistory]);
 
   // Listen for window resize events and save the width when user manually resizes
@@ -157,13 +168,22 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
     };
   }, []);
 
+  // Handler for creating new post-it (defined before keyboard shortcuts useEffect)
+  const handleCreateNewItem = useCallback(async () => {
+    try {
+      await invoke("open_postit_editor", {
+        mode: "create",
+      });
+    } catch (err) {
+      console.error("Failed to open editor:", err);
+      setToast({ message: "편집기를 열 수 없습니다", type: "error" });
+    }
+  }, []);
+
   // Keyboard shortcuts for monitor switching (Alt+1, Alt+2, Alt+3)
   // and quick selection (number keys 1-9) and ESC to close
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
-      // Don't handle shortcuts when editor is open
-      if (isEditorOpen) return;
-
       // ESC key - close the panel (in stealth mode)
       if (e.key === "Escape" && isStealthMode && onClose) {
         e.preventDefault();
@@ -174,8 +194,7 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
       // Cmd+N - create new post-it (only in history view)
       if (e.key === "n" && e.metaKey && !e.altKey && !e.ctrlKey && !e.shiftKey && currentView === "history") {
         e.preventDefault();
-        setEditingItem(null);
-        setIsEditorOpen(true);
+        handleCreateNewItem();
         return;
       }
 
@@ -289,7 +308,7 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [monitors.length, currentView, items, isStealthMode, onClose, onTranslate, onPolish, isEditorOpen]);
+  }, [monitors.length, currentView, items, isStealthMode, onClose, onTranslate, onPolish, handleCreateNewItem]);
 
   const loadMonitors = async () => {
     try {
@@ -388,41 +407,17 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
     }
   }, [onPolish]);
 
-  const handleEditItem = useCallback((item: ClipboardItem) => {
-    setEditingItem(item);
-    setIsEditorOpen(true);
-  }, []);
-
-  const handleCreateNewItem = useCallback(() => {
-    setEditingItem(null);
-    setIsEditorOpen(true);
-  }, []);
-
-  const handleEditorSave = useCallback(async (content: string) => {
-    if (editingItem) {
-      // Edit existing item
-      const success = await updateItemContent(editingItem.id, content);
-      if (success) {
-        setToast({ message: "수정되었습니다", type: "success" });
-      } else {
-        setToast({ message: "수정 실패", type: "error" });
-      }
-    } else {
-      // Create new item
-      const newItem = await createItem(content);
-      if (newItem) {
-        setToast({ message: "메모가 생성되었습니다", type: "success" });
-      } else {
-        setToast({ message: "생성 실패", type: "error" });
-      }
+  const handleEditItem = useCallback(async (item: ClipboardItem) => {
+    try {
+      await invoke("open_postit_editor", {
+        mode: "edit",
+        itemId: item.id,
+        initialContent: item.content,
+      });
+    } catch (err) {
+      console.error("Failed to open editor:", err);
+      setToast({ message: "편집기를 열 수 없습니다", type: "error" });
     }
-    setIsEditorOpen(false);
-    setEditingItem(null);
-  }, [editingItem, updateItemContent, createItem]);
-
-  const handleEditorClose = useCallback(() => {
-    setIsEditorOpen(false);
-    setEditingItem(null);
   }, []);
 
   const handleMoveToMonitor = async (index: number) => {
@@ -832,16 +827,6 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
         </div>
       )}
 
-      {/* Post-it Editor Modal */}
-      {isEditorOpen && (
-        <PostItEditor
-          mode={editingItem ? "edit" : "create"}
-          initialContent={editingItem?.content ?? ""}
-          itemId={editingItem?.id}
-          onSave={handleEditorSave}
-          onClose={handleEditorClose}
-        />
-      )}
     </div>
   );
 }

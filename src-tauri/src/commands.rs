@@ -2773,3 +2773,89 @@ pub async fn set_drawer_mode(
 
     Ok(())
 }
+
+#[tauri::command]
+pub async fn open_postit_editor(
+    app: tauri::AppHandle,
+    mode: String,
+    item_id: Option<String>,
+    initial_content: Option<String>,
+) -> Result<(), String> {
+    use tauri::WebviewWindowBuilder;
+    use tauri::WebviewUrl;
+
+    // Generate a unique window label
+    let window_label = format!("postit-editor-{}", uuid::Uuid::new_v4());
+
+    // Build URL with parameters
+    let mut url_params = vec![format!("window=editor"), format!("mode={}", mode)];
+
+    if let Some(id) = item_id {
+        url_params.push(format!("itemId={}", urlencoding::encode(&id)));
+    }
+
+    if let Some(content) = initial_content {
+        url_params.push(format!("content={}", urlencoding::encode(&content)));
+    }
+
+    let url = format!("index.html?{}", url_params.join("&"));
+
+    log::info!("Opening PostIt editor window: {}", url);
+
+    // Get main window position to determine which monitor to use
+    let main_window = app.get_webview_window("main");
+    let (editor_x, editor_y) = if let Some(main_win) = main_window {
+        if let (Ok(main_pos), Ok(main_size), Ok(scale)) = (
+            main_win.outer_position(),
+            main_win.outer_size(),
+            main_win.scale_factor(),
+        ) {
+            // Calculate center of main window
+            let main_center_x = main_pos.x as f64 + (main_size.width as f64 / 2.0);
+            let main_center_y = main_pos.y as f64 + (main_size.height as f64 / 2.0);
+
+            // Editor window size (in physical pixels)
+            let editor_width = 500.0 * scale;
+            let editor_height = 400.0 * scale;
+
+            // Position editor centered on main window's center
+            let editor_x = (main_center_x - editor_width / 2.0) as i32;
+            let editor_y = (main_center_y - editor_height / 2.0) as i32;
+
+            log::info!(
+                "Positioning editor at ({}, {}) based on main window at ({}, {})",
+                editor_x, editor_y, main_pos.x, main_pos.y
+            );
+
+            (Some(editor_x), Some(editor_y))
+        } else {
+            (None, None)
+        }
+    } else {
+        (None, None)
+    };
+
+    // Create the new window
+    let mut builder = WebviewWindowBuilder::new(&app, &window_label, WebviewUrl::App(url.into()))
+        .title("메모 편집")
+        .inner_size(500.0, 400.0)
+        .min_inner_size(400.0, 300.0)
+        .decorations(true)
+        .always_on_top(true);
+
+    // Set position if we calculated it, otherwise center
+    if let (Some(x), Some(y)) = (editor_x, editor_y) {
+        builder = builder.position(x as f64, y as f64);
+    } else {
+        builder = builder.center();
+    }
+
+    let window = builder
+        .build()
+        .map_err(|e| format!("Failed to create editor window: {}", e))?;
+
+    // Focus the window
+    window.set_focus().map_err(|e| format!("Failed to focus window: {}", e))?;
+
+    Ok(())
+}
