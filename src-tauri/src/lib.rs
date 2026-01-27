@@ -55,16 +55,24 @@ pub fn run() {
             let quit_item = MenuItem::with_id(app, "quit", "Quit TransClip", true, None::<&str>)?;
             let show_item = MenuItem::with_id(app, "show", "Show History", true, None::<&str>)?;
             let settings_item = MenuItem::with_id(app, "settings", "Settings...", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_item, &settings_item, &quit_item])?;
+            let feedback_item = MenuItem::with_id(app, "feedback", "Report Bug / Feedback", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_item, &settings_item, &feedback_item, &quit_item])?;
 
-            // Create tray icon - simple 32x32 white square
-            // 32x32 pixels * 4 bytes (RGBA) = 4096 bytes
-            let icon = Image::new_owned(vec![255, 255, 255, 255].repeat(32 * 32), 32, 32);
+            // Load tray icon from file
+            let icon_path = app
+                .path()
+                .resource_dir()
+                .expect("Failed to get resource dir")
+                .join("icons/32x32.png");
+            let icon = Image::from_path(&icon_path).unwrap_or_else(|_| {
+                // Fallback to embedded icon if file not found
+                Image::from_bytes(include_bytes!("../icons/32x32.png")).expect("Failed to load embedded icon")
+            });
 
             let _tray = TrayIconBuilder::new()
                 .icon(icon)
                 .menu(&menu)
-                .show_menu_on_left_click(false)
+                .show_menu_on_left_click(true)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "quit" => {
                         app.exit(0);
@@ -82,6 +90,10 @@ pub fn run() {
                             // Emit event to open settings view
                             let _ = window.emit("open_settings", ());
                         }
+                    }
+                    "feedback" => {
+                        // Open GitHub issues page in default browser
+                        let _ = open::that("https://github.com/dennis-hong/trans-clip/issues");
                     }
                     _ => {}
                 })
