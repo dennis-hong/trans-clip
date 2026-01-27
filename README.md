@@ -2,7 +2,7 @@
 
 클립보드의 텍스트를 Claude AI를 사용해 자동으로 번역해주는 macOS 앱입니다.
 
-![TransClip Screenshot](https://img.shields.io/badge/Platform-macOS-blue) ![Version](https://img.shields.io/badge/Version-0.1.5-green) ![License](https://img.shields.io/badge/License-MIT-yellow)
+![TransClip Screenshot](https://img.shields.io/badge/Platform-macOS-blue) ![Version](https://img.shields.io/badge/Version-0.1.6-green) ![License](https://img.shields.io/badge/License-MIT-yellow)
 
 ## ✨ 주요 기능
 
@@ -17,13 +17,13 @@
 
 ### 1. 다운로드
 
-[**📦 최신 버전 다운로드 (v0.1.5)**](https://github.com/dennis-hong/trans-clip/releases/latest)
+[**📦 최신 버전 다운로드 (v0.1.6)**](https://github.com/dennis-hong/trans-clip/releases/latest)
 
-위 링크에서 `TransClip_0.1.5_aarch64.app.zip` 파일을 다운로드하세요.
+위 링크에서 `TransClip_0.1.6_aarch64.app.zip` 파일을 다운로드하세요.
 
 ### 2. 설치 방법
 
-1. 다운로드한 `TransClip_0.1.5_aarch64.app.zip` 파일의 압축을 해제합니다
+1. 다운로드한 `TransClip_0.1.6_aarch64.app.zip` 파일의 압축을 해제합니다
 2. `TransClip.app`을 **Applications** 폴더로 드래그하여 이동합니다
 3. **처음 실행 전** 터미널에서 다음 명령어를 실행합니다 (quarantine 속성 제거):
 
@@ -39,9 +39,11 @@ xattr -cr /Applications/TransClip.app
 
 앱이 정상적으로 동작하려면 다음 권한이 필요합니다:
 
-- **접근성 권한** (클립보드 모니터링용):
+- **접근성 권한** (단축키 감지 및 클립보드 모니터링용):
   - 시스템 설정 > 개인 정보 보호 및 보안 > 접근성
   - TransClip 앱을 허용 목록에 추가
+  - **⚠️ 권한 설정 후 앱을 반드시 재시작해주세요!** (완전히 종료 후 다시 실행)
+  - 재시작하지 않으면 `Cmd+C` 두 번, `Cmd+D` 두 번 등의 단축키가 동작하지 않습니다
 
 ## 🔑 Claude API 키 설정
 
