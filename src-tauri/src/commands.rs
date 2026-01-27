@@ -2,8 +2,10 @@ use crate::database::{ClipboardItemRow, GlossaryEntryRow, TranslationRow, UserSe
 use crate::keychain;
 use crate::prompts;
 use crate::AppState;
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use tauri::ipc::Channel;
 use tauri::{Manager, State};
 
 // Store the last valid monitor index to preserve position across hide/show cycles
@@ -125,7 +127,7 @@ pub struct TranslateResponse {
     pub error: Option<TranslateError>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TokenUsage {
     pub input_tokens: i32,
@@ -263,6 +265,50 @@ pub struct PermissionStatus {
 pub struct PasteResponse {
     pub success: bool,
     pub error: Option<ErrorDetail>,
+}
+
+// ============================================
+// Streaming Event Types
+// ============================================
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase", tag = "event", content = "data")]
+pub enum TranslateStreamEvent {
+    Started {
+        detected_language: Option<String>,
+        from_cache: bool,
+        glossary_applied: Vec<String>,
+    },
+    Delta {
+        text: String,
+    },
+    Completed {
+        full_text: String,
+        token_usage: Option<TokenUsage>,
+    },
+    Error {
+        code: String,
+        message: String,
+    },
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase", tag = "event", content = "data")]
+pub enum PolishStreamEvent {
+    Started {
+        detected_language: Option<String>,
+    },
+    Delta {
+        text: String,
+    },
+    Completed {
+        full_text: String,
+        token_usage: Option<TokenUsage>,
+    },
+    Error {
+        code: String,
+        message: String,
+    },
 }
 
 // ============================================
@@ -583,6 +629,280 @@ pub async fn translate(
     }
 }
 
+#[tauri::command]
+pub async fn translate_stream(
+    state: State<'_, AppState>,
+    text: String,
+    source_language: Option<String>,
+    target_language: Option<String>,
+    model: Option<String>,
+    on_event: Channel<TranslateStreamEvent>,
+) -> Result<(), String> {
+    // Validation
+    if text.is_empty() {
+        let _ = on_event.send(TranslateStreamEvent::Error {
+            code: "EMPTY_TEXT".to_string(),
+            message: "Text cannot be empty".to_string(),
+        });
+        return Ok(());
+    }
+
+    if text.len() > 10000 {
+        let _ = on_event.send(TranslateStreamEvent::Error {
+            code: "TEXT_TOO_LONG".to_string(),
+            message: "Text exceeds maximum length of 10000 characters".to_string(),
+        });
+        return Ok(());
+    }
+
+    let db = state.db.lock().await;
+    let settings = db.get_settings().await.map_err(|e| e.to_string())?;
+
+    // Get API key from database
+    let api_key = match &settings.api_key {
+        Some(key) if !key.is_empty() => key.clone(),
+        _ => {
+            let _ = on_event.send(TranslateStreamEvent::Error {
+                code: "INVALID_API_KEY".to_string(),
+                message: "API key not configured. Please set your Claude API key in Settings."
+                    .to_string(),
+            });
+            return Ok(());
+        }
+    };
+
+    // Detect or use provided language
+    let src_lang = source_language.unwrap_or_else(|| detect_language(&text));
+    let tgt_lang = target_language.unwrap_or_else(|| {
+        if src_lang == "ko" {
+            "en".to_string()
+        } else {
+            "ko".to_string()
+        }
+    });
+
+    // Check if explicit model is provided (user wants a specific model, skip cache)
+    let explicit_model = model.is_some();
+
+    // Check cache first (skip cache if explicit model is provided)
+    if !explicit_model {
+        if let Ok(Some(cached)) = db
+            .find_cached_translation(&text, &src_lang, &tgt_lang, settings.translation_cache_days)
+            .await
+        {
+            let glossary_applied: Vec<String> = cached
+                .glossary_used
+                .map(|g| serde_json::from_str(&g).unwrap_or_default())
+                .unwrap_or_default();
+
+            let _ = on_event.send(TranslateStreamEvent::Started {
+                detected_language: Some(src_lang.clone()),
+                from_cache: true,
+                glossary_applied: glossary_applied.clone(),
+            });
+
+            let _ = on_event.send(TranslateStreamEvent::Completed {
+                full_text: cached.translated_text,
+                token_usage: match (cached.input_tokens, cached.output_tokens) {
+                    (Some(i), Some(o)) => Some(TokenUsage {
+                        input_tokens: i,
+                        output_tokens: o,
+                    }),
+                    _ => None,
+                },
+            });
+            return Ok(());
+        }
+    }
+
+    // Find matching glossary entries (language-agnostic)
+    let glossary_matches = db.find_glossary_matches(&text).await.unwrap_or_default();
+
+    // Build glossary context for prompt
+    let glossary_context = if glossary_matches.is_empty() {
+        String::new()
+    } else {
+        let terms: Vec<String> = glossary_matches
+            .iter()
+            .map(|g| format!("- {}: {}", g.keyword, g.description))
+            .collect();
+        format!(
+            "\n\nIMPORTANT: When you encounter the following terms, use the provided descriptions as context for translation:\n{}",
+            terms.join("\n")
+        )
+    };
+
+    let glossary_ids: Vec<String> = glossary_matches.iter().map(|g| g.id.clone()).collect();
+
+    // Send Started event
+    let _ = on_event.send(TranslateStreamEvent::Started {
+        detected_language: Some(src_lang.clone()),
+        from_cache: false,
+        glossary_applied: glossary_ids.clone(),
+    });
+
+    // Use provided model or fall back to settings
+    let use_model = model.unwrap_or_else(|| settings.preferred_model.clone());
+
+    // Build prompt
+    let prompt = format!(
+        "Translate the following text from {} to {}. Return only the translated text without any explanation.{}\n\nText to translate:\n{}",
+        if src_lang == "ko" { "Korean" } else { "English" },
+        if tgt_lang == "ko" { "Korean" } else { "English" },
+        glossary_context,
+        text
+    );
+
+    // Release the db lock before making the API call
+    drop(db);
+
+    // Call Claude API with streaming
+    let client = reqwest::Client::new();
+    let response = client
+        .post("https://api.anthropic.com/v1/messages")
+        .header("x-api-key", &api_key)
+        .header("anthropic-version", "2023-06-01")
+        .header("content-type", "application/json")
+        .json(&serde_json::json!({
+            "model": use_model,
+            "max_tokens": 4096,
+            "stream": true,
+            "messages": [{"role": "user", "content": prompt}]
+        }))
+        .send()
+        .await;
+
+    match response {
+        Ok(res) => {
+            if res.status().as_u16() == 401 {
+                let _ = on_event.send(TranslateStreamEvent::Error {
+                    code: "INVALID_API_KEY".to_string(),
+                    message: "Invalid API key".to_string(),
+                });
+                return Ok(());
+            }
+
+            if !res.status().is_success() {
+                let _ = on_event.send(TranslateStreamEvent::Error {
+                    code: "API_ERROR".to_string(),
+                    message: format!("API error: {}", res.status()),
+                });
+                return Ok(());
+            }
+
+            // Process SSE stream
+            let mut full_text = String::new();
+            let mut input_tokens: Option<i32> = None;
+            let mut output_tokens: Option<i32> = None;
+            let mut stream = res.bytes_stream();
+
+            let mut buffer = String::new();
+
+            while let Some(chunk) = stream.next().await {
+                match chunk {
+                    Ok(bytes) => {
+                        let chunk_str = String::from_utf8_lossy(&bytes);
+                        buffer.push_str(&chunk_str);
+
+                        // Process complete lines
+                        while let Some(pos) = buffer.find('\n') {
+                            let line = buffer[..pos].trim().to_string();
+                            buffer = buffer[pos + 1..].to_string();
+
+                            if line.starts_with("data: ") {
+                                let json_str = &line[6..];
+                                if json_str == "[DONE]" {
+                                    continue;
+                                }
+
+                                if let Ok(event) =
+                                    serde_json::from_str::<serde_json::Value>(json_str)
+                                {
+                                    let event_type = event["type"].as_str().unwrap_or("");
+
+                                    match event_type {
+                                        "content_block_delta" => {
+                                            if let Some(delta) = event["delta"]["text"].as_str() {
+                                                full_text.push_str(delta);
+                                                let _ = on_event.send(TranslateStreamEvent::Delta {
+                                                    text: delta.to_string(),
+                                                });
+                                            }
+                                        }
+                                        "message_start" => {
+                                            if let Some(usage) = event["message"]["usage"].as_object()
+                                            {
+                                                input_tokens =
+                                                    usage["input_tokens"].as_i64().map(|v| v as i32);
+                                            }
+                                        }
+                                        "message_delta" => {
+                                            if let Some(usage) = event["usage"].as_object() {
+                                                output_tokens =
+                                                    usage["output_tokens"].as_i64().map(|v| v as i32);
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = on_event.send(TranslateStreamEvent::Error {
+                            code: "STREAM_ERROR".to_string(),
+                            message: format!("Stream error: {}", e),
+                        });
+                        return Ok(());
+                    }
+                }
+            }
+
+            // Cache the translation
+            let db = state.db.lock().await;
+            let translation = TranslationRow {
+                id: uuid::Uuid::new_v4().to_string(),
+                source_text: text,
+                translated_text: full_text.clone(),
+                source_language: src_lang,
+                target_language: tgt_lang,
+                model: use_model,
+                created_at: chrono::Utc::now().to_rfc3339(),
+                glossary_used: Some(serde_json::to_string(&glossary_ids).unwrap()),
+                input_tokens,
+                output_tokens,
+            };
+
+            let _ = db.insert_translation(&translation).await;
+
+            // Update glossary usage counts
+            if !glossary_ids.is_empty() {
+                let _ = db.increment_glossary_usage(&glossary_ids).await;
+            }
+
+            // Send Completed event
+            let _ = on_event.send(TranslateStreamEvent::Completed {
+                full_text,
+                token_usage: match (input_tokens, output_tokens) {
+                    (Some(i), Some(o)) => Some(TokenUsage {
+                        input_tokens: i,
+                        output_tokens: o,
+                    }),
+                    _ => None,
+                },
+            });
+        }
+        Err(e) => {
+            let _ = on_event.send(TranslateStreamEvent::Error {
+                code: "NETWORK_ERROR".to_string(),
+                message: format!("Network error: {}", e),
+            });
+        }
+    }
+
+    Ok(())
+}
+
 fn detect_language(text: &str) -> String {
     // Detect based on Korean character ratio (>= 30% = Korean)
     let (korean, total) = text.chars().fold((0, 0), |(ko, tot), c| {
@@ -776,6 +1096,204 @@ pub async fn polish(
             }),
         }),
     }
+}
+
+#[tauri::command]
+pub async fn polish_stream(
+    state: State<'_, AppState>,
+    text: String,
+    context: String,
+    channel: String,
+    options: Vec<String>,
+    model: Option<String>,
+    on_event: Channel<PolishStreamEvent>,
+) -> Result<(), String> {
+    // Validation
+    if text.is_empty() {
+        let _ = on_event.send(PolishStreamEvent::Error {
+            code: "EMPTY_TEXT".to_string(),
+            message: "Text cannot be empty".to_string(),
+        });
+        return Ok(());
+    }
+
+    if text.len() > 10000 {
+        let _ = on_event.send(PolishStreamEvent::Error {
+            code: "TEXT_TOO_LONG".to_string(),
+            message: "Text exceeds maximum length of 10000 characters".to_string(),
+        });
+        return Ok(());
+    }
+
+    let db = state.db.lock().await;
+    let settings = db.get_settings().await.map_err(|e| e.to_string())?;
+
+    // Get API key
+    let api_key = match &settings.api_key {
+        Some(key) if !key.is_empty() => key.clone(),
+        _ => {
+            let _ = on_event.send(PolishStreamEvent::Error {
+                code: "INVALID_API_KEY".to_string(),
+                message: "API key not configured. Please set your Claude API key in Settings."
+                    .to_string(),
+            });
+            return Ok(());
+        }
+    };
+
+    // Detect language
+    let detected_lang = detect_language(&text);
+
+    // Send Started event
+    let _ = on_event.send(PolishStreamEvent::Started {
+        detected_language: Some(detected_lang.clone()),
+    });
+
+    // Use provided model or fall back to settings
+    let use_model = model.unwrap_or_else(|| settings.preferred_model.clone());
+
+    // Build prompts using the prompts module
+    let system_prompt = if detected_lang == "ko" {
+        prompts::polish::build_system_prompt()
+    } else {
+        prompts::polish::build_system_prompt_english()
+    };
+
+    let user_prompt = prompts::polish::build_user_prompt(
+        &text,
+        &context,
+        &channel,
+        &options,
+        &detected_lang,
+    );
+
+    // Release the db lock before making the API call
+    drop(db);
+
+    // Call Claude API with streaming
+    let client = reqwest::Client::new();
+    let response = client
+        .post("https://api.anthropic.com/v1/messages")
+        .header("x-api-key", &api_key)
+        .header("anthropic-version", "2023-06-01")
+        .header("content-type", "application/json")
+        .json(&serde_json::json!({
+            "model": use_model,
+            "max_tokens": 4096,
+            "stream": true,
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": user_prompt}]
+        }))
+        .send()
+        .await;
+
+    match response {
+        Ok(res) => {
+            if res.status().as_u16() == 401 {
+                let _ = on_event.send(PolishStreamEvent::Error {
+                    code: "INVALID_API_KEY".to_string(),
+                    message: "Invalid API key".to_string(),
+                });
+                return Ok(());
+            }
+
+            if !res.status().is_success() {
+                let _ = on_event.send(PolishStreamEvent::Error {
+                    code: "API_ERROR".to_string(),
+                    message: format!("API error: {}", res.status()),
+                });
+                return Ok(());
+            }
+
+            // Process SSE stream
+            let mut full_text = String::new();
+            let mut input_tokens: Option<i32> = None;
+            let mut output_tokens: Option<i32> = None;
+            let mut stream = res.bytes_stream();
+
+            let mut buffer = String::new();
+
+            while let Some(chunk) = stream.next().await {
+                match chunk {
+                    Ok(bytes) => {
+                        let chunk_str = String::from_utf8_lossy(&bytes);
+                        buffer.push_str(&chunk_str);
+
+                        // Process complete lines
+                        while let Some(pos) = buffer.find('\n') {
+                            let line = buffer[..pos].trim().to_string();
+                            buffer = buffer[pos + 1..].to_string();
+
+                            if line.starts_with("data: ") {
+                                let json_str = &line[6..];
+                                if json_str == "[DONE]" {
+                                    continue;
+                                }
+
+                                if let Ok(event) =
+                                    serde_json::from_str::<serde_json::Value>(json_str)
+                                {
+                                    let event_type = event["type"].as_str().unwrap_or("");
+
+                                    match event_type {
+                                        "content_block_delta" => {
+                                            if let Some(delta) = event["delta"]["text"].as_str() {
+                                                full_text.push_str(delta);
+                                                let _ = on_event.send(PolishStreamEvent::Delta {
+                                                    text: delta.to_string(),
+                                                });
+                                            }
+                                        }
+                                        "message_start" => {
+                                            if let Some(usage) = event["message"]["usage"].as_object()
+                                            {
+                                                input_tokens =
+                                                    usage["input_tokens"].as_i64().map(|v| v as i32);
+                                            }
+                                        }
+                                        "message_delta" => {
+                                            if let Some(usage) = event["usage"].as_object() {
+                                                output_tokens =
+                                                    usage["output_tokens"].as_i64().map(|v| v as i32);
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = on_event.send(PolishStreamEvent::Error {
+                            code: "STREAM_ERROR".to_string(),
+                            message: format!("Stream error: {}", e),
+                        });
+                        return Ok(());
+                    }
+                }
+            }
+
+            // Send Completed event
+            let _ = on_event.send(PolishStreamEvent::Completed {
+                full_text: full_text.trim().to_string(),
+                token_usage: match (input_tokens, output_tokens) {
+                    (Some(i), Some(o)) => Some(TokenUsage {
+                        input_tokens: i,
+                        output_tokens: o,
+                    }),
+                    _ => None,
+                },
+            });
+        }
+        Err(e) => {
+            let _ = on_event.send(PolishStreamEvent::Error {
+                code: "NETWORK_ERROR".to_string(),
+                message: format!("Network error: {}", e),
+            });
+        }
+    }
+
+    Ok(())
 }
 
 // ============================================

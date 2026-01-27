@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { usePolish } from "@/hooks/usePolish";
+import { usePolishStream } from "@/hooks/usePolishStream";
 import {
   usePolishStore,
   useClipboardStore,
@@ -18,7 +18,13 @@ interface PolishPopupProps {
 }
 
 export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupProps) {
-  const { polish, isLoading, error, result } = usePolish();
+  const {
+    polish,
+    isStreaming,
+    streamedText,
+    fullText,
+    error,
+  } = usePolishStream();
   const { createItem } = useClipboardStore();
   const [editableText, setEditableText] = useState(sourceText);
   const [isSaved, setIsSaved] = useState(false);
@@ -62,25 +68,27 @@ export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupPro
   }, [onClose]);
 
   const handleCopy = useCallback(async () => {
-    if (result?.polishedText) {
+    const textToCopy = fullText || streamedText;
+    if (textToCopy) {
       try {
-        await invoke("set_clipboard", { text: result.polishedText });
+        await invoke("set_clipboard", { text: textToCopy });
         onClose();
       } catch (err) {
         console.error("Failed to copy:", err);
       }
     }
-  }, [result?.polishedText, onClose]);
+  }, [fullText, streamedText, onClose]);
 
   const handleReplace = useCallback(async () => {
-    if (result?.polishedText) {
+    const textToReplace = fullText || streamedText;
+    if (textToReplace) {
       try {
         await invoke("hide_translation_popup");
         await new Promise((resolve) => setTimeout(resolve, 300));
         const response = await invoke<{
           success: boolean;
           error?: { code: string; message: string };
-        }>("paste_text", { text: result.polishedText });
+        }>("paste_text", { text: textToReplace });
         console.log("paste_text response:", response);
         if (!response.success && response.error) {
           console.error(
@@ -94,7 +102,7 @@ export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupPro
         console.error("Failed to replace:", err);
       }
     }
-  }, [result?.polishedText, onClose]);
+  }, [fullText, streamedText, onClose]);
 
   const handleRepolish = useCallback(() => {
     if (editableText.trim()) {
@@ -103,24 +111,29 @@ export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupPro
   }, [editableText, lastContext, lastChannel, lastOptions, selectedModel, polish]);
 
   const handleSaveAsPostIt = useCallback(async () => {
-    if (result?.polishedText) {
-      const newItem = await createItem(result.polishedText);
+    const textToSave = fullText || streamedText;
+    if (textToSave) {
+      const newItem = await createItem(textToSave);
       if (newItem) {
         setIsSaved(true);
         // Reset saved state after 2 seconds
         setTimeout(() => setIsSaved(false), 2000);
       }
     }
-  }, [result?.polishedText, createItem]);
+  }, [fullText, streamedText, createItem]);
 
   const handleTranslate = useCallback(() => {
-    if (result?.polishedText && onTranslate) {
-      onTranslate(result.polishedText);
+    const textToTranslate = fullText || streamedText;
+    if (textToTranslate && onTranslate) {
+      onTranslate(textToTranslate);
     }
-  }, [result?.polishedText, onTranslate]);
+  }, [fullText, streamedText, onTranslate]);
 
   // Check if source text has been modified
   const isSourceModified = editableText !== sourceText;
+
+  // Determine if we have content to display
+  const hasResult = Boolean(fullText || streamedText);
 
   const handleContextChange = (context: PolishContext) => {
     setLastContext(context);
@@ -222,7 +235,16 @@ export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupPro
               <span className="text-xs font-medium text-green-700">✨ 정돈된 결과</span>
             </div>
             <div className="flex-1 p-3 bg-green-100 border-2 border-green-300 rounded-lg shadow-md overflow-y-auto">
-              {isLoading ? (
+              {error ? (
+                <p className="text-sm text-red-600">{error}</p>
+              ) : (fullText || streamedText) ? (
+                <p className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
+                  {fullText || streamedText}
+                  {isStreaming && (
+                    <span className="inline-block w-0.5 h-4 ml-0.5 bg-green-600 animate-pulse" />
+                  )}
+                </p>
+              ) : (
                 <div className="flex items-center justify-center h-full">
                   <div className="flex items-center gap-2 text-sm text-green-600">
                     <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
@@ -243,13 +265,7 @@ export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupPro
                     <span>다듬는 중...</span>
                   </div>
                 </div>
-              ) : error ? (
-                <p className="text-sm text-red-600">{error}</p>
-              ) : result?.polishedText ? (
-                <p className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
-                  {result.polishedText}
-                </p>
-              ) : null}
+              )}
             </div>
           </div>
         </div>
@@ -309,7 +325,7 @@ export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupPro
               </select>
               <button
                 onClick={handleRepolish}
-                disabled={isLoading || !editableText.trim()}
+                disabled={isStreaming || !editableText.trim()}
                 className="px-3 py-1 text-xs font-medium text-purple-700 bg-purple-50 border border-purple-300 rounded-md hover:bg-purple-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 다시 다듬기
@@ -348,14 +364,14 @@ export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupPro
       <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-200/50">
         <button
           onClick={handleTranslate}
-          disabled={isLoading || !result?.polishedText}
+          disabled={isStreaming || !hasResult}
           className="px-4 py-2 text-sm font-medium text-blue-700 bg-white border border-blue-300 rounded-lg hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           번역
         </button>
         <button
           onClick={handleSaveAsPostIt}
-          disabled={isLoading || !result?.polishedText || isSaved}
+          disabled={isStreaming || !hasResult || isSaved}
           className={`px-4 py-2 text-sm font-medium border rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
             isSaved
               ? "text-green-700 bg-green-50 border-green-300"
@@ -366,14 +382,14 @@ export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupPro
         </button>
         <button
           onClick={handleCopy}
-          disabled={isLoading || !result?.polishedText}
+          disabled={isStreaming || !hasResult}
           className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           복사
         </button>
         <button
           onClick={handleReplace}
-          disabled={isLoading || !result?.polishedText}
+          disabled={isStreaming || !hasResult}
           className="px-4 py-2 text-sm font-medium text-white bg-purple-500 rounded-lg hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           바꾸기

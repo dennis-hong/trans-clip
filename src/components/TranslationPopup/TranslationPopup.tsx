@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useTranslation } from "@/hooks/useTranslation";
+import { useTranslationStream } from "@/hooks/useTranslationStream";
 import { useClipboardStore } from "@/store";
 import { CLAUDE_MODELS, type ClaudeModel } from "@/types";
 
@@ -13,23 +13,32 @@ export function TranslationPopup({
   sourceText,
   onClose,
 }: TranslationPopupProps) {
-  const { translate, isLoading, error, result } = useTranslation();
+  const {
+    translate,
+    isStreaming,
+    streamedText,
+    fullText,
+    detectedLanguage,
+    fromCache,
+    glossaryApplied,
+    error,
+  } = useTranslationStream();
   const { createItem } = useClipboardStore();
   const [editableText, setEditableText] = useState(sourceText);
   const [isSaved, setIsSaved] = useState(false);
   const [selectedModel, setSelectedModel] = useState<ClaudeModel | undefined>(undefined);
-
   // Sync editableText when sourceText changes
   useEffect(() => {
     setEditableText(sourceText);
   }, [sourceText]);
 
-  // Translate on mount
+  // Translate on mount only
   useEffect(() => {
     if (sourceText) {
       translate(sourceText);
     }
-  }, [sourceText, translate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceText]);  // Intentionally exclude translate to prevent re-runs
 
   // Handle ESC key to close
   useEffect(() => {
@@ -45,25 +54,27 @@ export function TranslationPopup({
   }, [onClose]);
 
   const handleCopy = useCallback(async () => {
-    if (result?.translatedText) {
+    const textToCopy = fullText || streamedText;
+    if (textToCopy) {
       try {
-        await invoke("set_clipboard", { text: result.translatedText });
+        await invoke("set_clipboard", { text: textToCopy });
         onClose();
       } catch (err) {
         console.error("Failed to copy:", err);
       }
     }
-  }, [result?.translatedText, onClose]);
+  }, [fullText, streamedText, onClose]);
 
   const handleReplace = useCallback(async () => {
-    if (result?.translatedText) {
+    const textToReplace = fullText || streamedText;
+    if (textToReplace) {
       try {
         // First hide the popup to return focus to the original app
         await invoke("hide_translation_popup");
         // Give the original app time to regain focus (increased delay)
         await new Promise(resolve => setTimeout(resolve, 300));
         // Now simulate paste in the original app
-        const response = await invoke<{ success: boolean; error?: { code: string; message: string } }>("paste_text", { text: result.translatedText });
+        const response = await invoke<{ success: boolean; error?: { code: string; message: string } }>("paste_text", { text: textToReplace });
         console.log("paste_text response:", response);
         if (!response.success && response.error) {
           console.error("Paste failed:", response.error.code, response.error.message);
@@ -73,7 +84,7 @@ export function TranslationPopup({
         console.error("Failed to replace:", err);
       }
     }
-  }, [result?.translatedText, onClose]);
+  }, [fullText, streamedText, onClose]);
 
   const handleRetranslate = useCallback(() => {
     if (editableText.trim()) {
@@ -82,23 +93,27 @@ export function TranslationPopup({
   }, [editableText, selectedModel, translate]);
 
   const handleSaveAsPostIt = useCallback(async () => {
-    if (result?.translatedText) {
-      const newItem = await createItem(result.translatedText);
+    const textToSave = fullText || streamedText;
+    if (textToSave) {
+      const newItem = await createItem(textToSave);
       if (newItem) {
         setIsSaved(true);
         // Reset saved state after 2 seconds
         setTimeout(() => setIsSaved(false), 2000);
       }
     }
-  }, [result?.translatedText, createItem]);
+  }, [fullText, streamedText, createItem]);
 
   // Check if source text has been modified
   const isSourceModified = editableText !== sourceText;
 
-  const detectedLanguage = result?.detectedLanguage ?? "en";
-  const targetLanguage = detectedLanguage === "ko" ? "en" : "ko";
-  const sourceLabel = detectedLanguage === "ko" ? "한국어" : "English";
+  const displayLanguage = detectedLanguage ?? "en";
+  const targetLanguage = displayLanguage === "ko" ? "en" : "ko";
+  const sourceLabel = displayLanguage === "ko" ? "한국어" : "English";
   const targetLabel = targetLanguage === "ko" ? "한국어" : "English";
+
+  // Determine if we have content to display
+  const hasResult = Boolean(fullText || streamedText);
 
   return (
     <div className="flex flex-col h-full w-full">
@@ -133,15 +148,15 @@ export function TranslationPopup({
 
         {/* Footer info */}
         <div className="flex items-center gap-3 text-xs text-gray-500">
-          {result?.glossaryApplied && result.glossaryApplied.length > 0 && (
+          {glossaryApplied && glossaryApplied.length > 0 && (
             <span className="flex items-center gap-1">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
               </svg>
-              용어집 {result.glossaryApplied.length}개 적용
+              용어집 {glossaryApplied.length}개 적용
             </span>
           )}
-          {result?.fromCache && (
+          {fromCache && (
             <span className="text-green-600">캐시</span>
           )}
         </div>
@@ -208,7 +223,16 @@ export function TranslationPopup({
               </span>
             </div>
             <div className="flex-1 p-4 bg-blue-100 border-2 border-blue-300 rounded-lg shadow-md overflow-y-auto">
-              {isLoading ? (
+              {error ? (
+                <p className="text-sm text-red-600">{error}</p>
+              ) : (fullText || streamedText) ? (
+                <p className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
+                  {fullText || streamedText}
+                  {isStreaming && (
+                    <span className="inline-block w-0.5 h-4 ml-0.5 bg-blue-600 animate-pulse" />
+                  )}
+                </p>
+              ) : (
                 <div className="flex items-center justify-center h-full">
                   <div className="flex items-center gap-2 text-sm text-blue-600">
                     <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
@@ -229,12 +253,6 @@ export function TranslationPopup({
                     <span>번역 중...</span>
                   </div>
                 </div>
-              ) : error ? (
-                <p className="text-sm text-red-600">{error}</p>
-              ) : (
-                <p className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
-                  {result?.translatedText}
-                </p>
               )}
             </div>
           </div>
@@ -260,7 +278,7 @@ export function TranslationPopup({
           </select>
           <button
             onClick={handleRetranslate}
-            disabled={isLoading || !editableText.trim()}
+            disabled={isStreaming || !editableText.trim()}
             className="px-3 py-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-300 rounded-md hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             다시 번역
@@ -268,7 +286,7 @@ export function TranslationPopup({
         </div>
         <button
           onClick={handleSaveAsPostIt}
-          disabled={isLoading || !result?.translatedText || isSaved}
+          disabled={isStreaming || !hasResult || isSaved}
           className={`px-4 py-2 text-sm font-medium border rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
             isSaved
               ? "text-green-700 bg-green-50 border-green-300"
@@ -279,14 +297,14 @@ export function TranslationPopup({
         </button>
         <button
           onClick={handleCopy}
-          disabled={isLoading || !result?.translatedText}
+          disabled={isStreaming || !hasResult}
           className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           복사
         </button>
         <button
           onClick={handleReplace}
-          disabled={isLoading || !result?.translatedText}
+          disabled={isStreaming || !hasResult}
           className="px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           바꾸기

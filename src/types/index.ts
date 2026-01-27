@@ -307,6 +307,47 @@ export interface ExportGlossaryResponse {
 }
 
 // ============================================
+// Streaming Event Types
+// ============================================
+
+/**
+ * 번역 스트리밍 이벤트
+ */
+export type TranslateStreamEvent =
+  | {
+      event: "started";
+      data: {
+        detectedLanguage: string | null;
+        fromCache: boolean;
+        glossaryApplied: string[];
+      };
+    }
+  | { event: "delta"; data: { text: string } }
+  | {
+      event: "completed";
+      data: {
+        fullText: string;
+        tokenUsage: { inputTokens: number; outputTokens: number } | null;
+      };
+    }
+  | { event: "error"; data: { code: string; message: string } };
+
+/**
+ * 다듬기 스트리밍 이벤트
+ */
+export type PolishStreamEvent =
+  | { event: "started"; data: { detectedLanguage: string | null } }
+  | { event: "delta"; data: { text: string } }
+  | {
+      event: "completed";
+      data: {
+        fullText: string;
+        tokenUsage: { inputTokens: number; outputTokens: number } | null;
+      };
+    }
+  | { event: "error"; data: { code: string; message: string } };
+
+// ============================================
 // Event Payload Types
 // ============================================
 

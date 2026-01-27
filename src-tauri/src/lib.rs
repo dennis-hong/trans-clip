@@ -147,8 +147,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // Translation commands
             commands::translate,
+            commands::translate_stream,
             // Polish commands
             commands::polish,
+            commands::polish_stream,
             // Clipboard commands
             commands::get_clipboard_history,
             commands::delete_clipboard_item,
