@@ -40,19 +40,6 @@ export function TranslationPopup({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceText]);  // Intentionally exclude translate to prevent re-runs
 
-  // Handle ESC key to close
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
   const handleCopy = useCallback(async () => {
     const textToCopy = fullText || streamedText;
     if (textToCopy) {
@@ -85,6 +72,24 @@ export function TranslationPopup({
       }
     }
   }, [fullText, streamedText, onClose]);
+
+  // Handle keyboard shortcuts (ESC to close, Cmd/Ctrl+Enter to replace)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        if (!isStreaming && (fullText || streamedText)) {
+          handleReplace();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose, isStreaming, fullText, streamedText, handleReplace]);
 
   const handleRetranslate = useCallback(() => {
     if (editableText.trim()) {
@@ -306,8 +311,10 @@ export function TranslationPopup({
           onClick={handleReplace}
           disabled={isStreaming || !hasResult}
           className="px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          title="바꾸기 (⌘+Enter)"
         >
           바꾸기
+          <span className="ml-1.5 text-[10px] opacity-70">⌘↵</span>
         </button>
       </div>
     </div>
