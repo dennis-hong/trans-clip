@@ -60,9 +60,11 @@ export function PostItEditorWindow() {
       console.log("Emitting postit_saved event");
       await emit("postit_saved", { mode: params.mode, itemId: params.itemId });
 
-      // Close this window
+      // Close this window after a small delay to allow WebKit to finish processing
+      // This prevents a race condition that can cause WebKit crashes
       console.log("Closing window");
       const currentWindow = getCurrentWindow();
+      await new Promise((resolve) => setTimeout(resolve, 50));
       await currentWindow.close();
     } catch (error) {
       console.error("Failed to save:", error);
@@ -72,6 +74,8 @@ export function PostItEditorWindow() {
 
   const handleClose = useCallback(async () => {
     const currentWindow = getCurrentWindow();
+    // Small delay to allow WebKit to finish processing before window destruction
+    await new Promise((resolve) => setTimeout(resolve, 50));
     await currentWindow.close();
   }, []);
 
