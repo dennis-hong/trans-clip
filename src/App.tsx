@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { DrawerPanel } from "@/components/DrawerPanel";
 import { TranslationPopup } from "@/components/TranslationPopup";
 import { PolishPopup } from "@/components/PolishPopup";
@@ -14,25 +15,44 @@ function App() {
   const [sourceText, setSourceText] = useState<string | null>(null);
   const [hasAccessibility, setHasAccessibility] = useState<boolean | null>(null);
   const [openedFromHistory, setOpenedFromHistory] = useState(false);
+  const [showRestartDialog, setShowRestartDialog] = useState(false);
+  const prevAccessibilityRef = useRef<boolean | null>(null);
 
-  // Check accessibility permission on mount
+  // Check accessibility permission on mount and detect changes
   useEffect(() => {
-    if (hasAccessibility === true) return;
+    if (hasAccessibility === true && !showRestartDialog) return;
 
     const checkPermission = async () => {
       try {
         const result = await invoke<{ granted: boolean }>("check_accessibility_permission");
+
+        // Detect permission change from false to true
+        if (prevAccessibilityRef.current === false && result.granted === true) {
+          setShowRestartDialog(true);
+        }
+
+        prevAccessibilityRef.current = result.granted;
         setHasAccessibility(result.granted);
       } catch (err) {
         console.error("Failed to check accessibility permission:", err);
         setHasAccessibility(false);
+        prevAccessibilityRef.current = false;
       }
     };
 
     checkPermission();
-    const interval = setInterval(checkPermission, 3000);
+    const interval = setInterval(checkPermission, 2000);
     return () => clearInterval(interval);
-  }, [hasAccessibility]);
+  }, [hasAccessibility, showRestartDialog]);
+
+  // Handle app restart
+  const handleRestart = useCallback(async () => {
+    try {
+      await relaunch();
+    } catch (err) {
+      console.error("Failed to restart app:", err);
+    }
+  }, []);
 
   // Position window at bottom on mount
   useEffect(() => {
@@ -160,6 +180,43 @@ function App() {
     setOpenedFromHistory(false);
     setPopupMode("translate");
   }, []);
+
+  // Restart dialog for accessibility permission
+  if (showRestartDialog) {
+    return (
+      <div className="h-screen w-full overflow-hidden bg-transparent">
+        <div className="h-full flex flex-col items-center justify-center bg-gradient-to-b from-gray-50/98 to-white/98 backdrop-blur-md rounded-t-2xl border border-gray-200/50 border-b-0 shadow-2xl">
+          <div className="bg-white rounded-2xl shadow-xl p-6 max-w-sm mx-4 border border-gray-100">
+            <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 bg-green-100 rounded-full">
+              <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h2 className="text-lg font-semibold text-gray-900 text-center mb-2">
+              접근성 권한이 허용되었습니다
+            </h2>
+            <p className="text-sm text-gray-600 text-center mb-6">
+              기능을 활성화하려면 앱을 재시작해야 합니다.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowRestartDialog(false)}
+                className="flex-1 px-4 py-2.5 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              >
+                나중에
+              </button>
+              <button
+                onClick={handleRestart}
+                className="flex-1 px-4 py-2.5 text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 rounded-lg transition-colors"
+              >
+                지금 재시작
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Show translation/polish popup if active
   if (popupMode === "translate" && sourceText) {
