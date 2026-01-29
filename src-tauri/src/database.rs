@@ -291,7 +291,18 @@ impl Database {
     }
 
     pub async fn cleanup_old_clipboard_items(&self, max_count: i32) -> Result<(), sqlx::Error> {
-        // Delete oldest non-pinned items if count exceeds max
+        // Get the count of pinned items (these are always preserved)
+        let pinned_count: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 1"
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        // Calculate how many non-pinned items we can keep
+        // Total slots = max_count, pinned items take priority
+        let non_pinned_slots = std::cmp::max(0, max_count as i64 - pinned_count.0) as i32;
+
+        // Delete oldest non-pinned items if count exceeds available slots
         sqlx::query(
             r#"
             DELETE FROM clipboard_items
@@ -303,7 +314,7 @@ impl Database {
             )
             "#,
         )
-        .bind(max_count)
+        .bind(non_pinned_slots)
         .execute(&self.pool)
         .await?;
 
