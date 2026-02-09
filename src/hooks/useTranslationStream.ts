@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from "react";
 import { invoke, Channel } from "@tauri-apps/api/core";
-import type { TranslateStreamEvent, Language } from "@/types";
+import type { TranslateStreamEvent, Language, TranslateResponse } from "@/types";
 
 interface UseTranslationStreamOptions {
   sourceLanguage?: Language | "auto";
@@ -36,6 +36,9 @@ export function useTranslationStream(
   const accumulatedTextRef = useRef("");
   // Ref to prevent concurrent translate calls
   const isTranslatingRef = useRef(false);
+  // Refs to detect when channel events are actually received
+  const receivedAnyEventRef = useRef(false);
+  const receivedFinalEventRef = useRef(false);
 
   const translate = useCallback(
     async (text: string, model?: string): Promise<void> => {
@@ -44,21 +47,57 @@ export function useTranslationStream(
         return;
       }
       isTranslatingRef.current = true;
+      receivedAnyEventRef.current = false;
+      receivedFinalEventRef.current = false;
 
-      setIsStreaming(true);
-      setStreamedText("");
-      setFullText("");
       setError(null);
-      setFromCache(false);
-      setGlossaryApplied([]);
-      setTokenUsage(null);
-      setDetectedLanguage(null);
-      accumulatedTextRef.current = "";
 
       try {
+        // Fast path: if cached, bypass streaming channel entirely.
+        const cached = await invoke<TranslateResponse | null>("get_cached_translation", {
+          text,
+          sourceLanguage:
+            options.sourceLanguage === "auto"
+              ? undefined
+              : options.sourceLanguage,
+          targetLanguage: options.targetLanguage,
+          model,
+        });
+
+        if (cached) {
+          setDetectedLanguage(cached.detectedLanguage ?? null);
+          setFromCache(cached.fromCache);
+          setGlossaryApplied(cached.glossaryApplied ?? []);
+          setTokenUsage(cached.tokenUsage ?? null);
+
+          const translatedText = cached.translatedText ?? "";
+          setFullText(translatedText);
+          setStreamedText(translatedText);
+
+          if (!cached.success && cached.error) {
+            setError(cached.error.message);
+          } else {
+            setError(null);
+          }
+
+          setIsStreaming(false);
+          return;
+        }
+
+        // Streaming path (cache miss)
+        setIsStreaming(true);
+        setStreamedText("");
+        setFullText("");
+        setFromCache(false);
+        setGlossaryApplied([]);
+        setTokenUsage(null);
+        setDetectedLanguage(null);
+        accumulatedTextRef.current = "";
+
         const channel = new Channel<TranslateStreamEvent>();
 
         channel.onmessage = (event: TranslateStreamEvent) => {
+          receivedAnyEventRef.current = true;
           switch (event.event) {
             case "started":
               setDetectedLanguage(event.data.detectedLanguage as Language | null);
@@ -70,6 +109,7 @@ export function useTranslationStream(
               setStreamedText(accumulatedTextRef.current);
               break;
             case "completed":
+              receivedFinalEventRef.current = true;
               // Use accumulated text as fallback if fullText is undefined
               const finalText = event.data.fullText ?? accumulatedTextRef.current;
               setFullText(finalText);
@@ -78,6 +118,7 @@ export function useTranslationStream(
               setIsStreaming(false);
               break;
             case "error":
+              receivedFinalEventRef.current = true;
               setError(event.data.message);
               setIsStreaming(false);
               break;

@@ -161,6 +161,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // Translation commands
             commands::translate::translate,
+            commands::translate::get_cached_translation,
             commands::translate::translate_stream,
             // Polish commands
             commands::polish::polish,

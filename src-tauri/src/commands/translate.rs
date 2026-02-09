@@ -7,6 +7,90 @@ use tauri::State;
 use super::types::{TokenUsage, TranslateError, TranslateResponse, TranslateStreamEvent};
 
 #[tauri::command]
+pub async fn get_cached_translation(
+    state: State<'_, AppState>,
+    text: String,
+    source_language: Option<String>,
+    target_language: Option<String>,
+    model: Option<String>,
+) -> Result<Option<TranslateResponse>, String> {
+    // Validation
+    if text.is_empty() {
+        return Ok(Some(TranslateResponse {
+            success: false,
+            translated_text: None,
+            detected_language: None,
+            from_cache: false,
+            glossary_applied: vec![],
+            token_usage: None,
+            error: Some(TranslateError {
+                code: "EMPTY_TEXT".to_string(),
+                message: "Text cannot be empty".to_string(),
+            }),
+        }));
+    }
+
+    if text.len() > 10000 {
+        return Ok(Some(TranslateResponse {
+            success: false,
+            translated_text: None,
+            detected_language: None,
+            from_cache: false,
+            glossary_applied: vec![],
+            token_usage: None,
+            error: Some(TranslateError {
+                code: "TEXT_TOO_LONG".to_string(),
+                message: "Text exceeds maximum length of 10000 characters".to_string(),
+            }),
+        }));
+    }
+
+    // If explicit model is provided, caller intends to bypass cache.
+    if model.is_some() {
+        return Ok(None);
+    }
+
+    let db = state.db.lock().await;
+    let settings = db.get_settings().await.map_err(|e| e.to_string())?;
+
+    // Detect or use provided language
+    let src_lang = source_language.unwrap_or_else(|| detect_language(&text));
+    let tgt_lang = target_language.unwrap_or_else(|| {
+        if src_lang == "ko" {
+            "en".to_string()
+        } else {
+            "ko".to_string()
+        }
+    });
+
+    if let Ok(Some(cached)) = db
+        .find_cached_translation(&text, &src_lang, &tgt_lang, settings.translation_cache_days)
+        .await
+    {
+        return Ok(Some(TranslateResponse {
+            success: true,
+            translated_text: Some(cached.translated_text),
+            detected_language: Some(src_lang),
+            from_cache: true,
+            glossary_applied: cached
+                .glossary_used
+                .map(|g| serde_json::from_str(&g).unwrap_or_default())
+                .unwrap_or_default(),
+            token_usage: match (cached.input_tokens, cached.output_tokens) {
+                (Some(i), Some(o)) => Some(TokenUsage {
+                    input_tokens: i,
+                    output_tokens: o,
+                }),
+                _ => None,
+            },
+            error: None,
+        }));
+    }
+
+    Ok(None)
+}
+
+#[tauri::command]
 pub async fn translate(
     state: State<'_, AppState>,
     text: String,
@@ -312,6 +396,8 @@ pub async fn translate_stream(
                 .map(|g| serde_json::from_str(&g).unwrap_or_default())
                 .unwrap_or_default();
 
+            let cached_text = cached.translated_text;
+
             let _ = on_event.send(TranslateStreamEvent::Started {
                 detected_language: Some(src_lang.clone()),
                 from_cache: true,
@@ -319,7 +405,7 @@ pub async fn translate_stream(
             });
 
             let _ = on_event.send(TranslateStreamEvent::Completed {
-                full_text: cached.translated_text,
+                full_text: cached_text.clone(),
                 token_usage: match (cached.input_tokens, cached.output_tokens) {
                     (Some(i), Some(o)) => Some(TokenUsage {
                         input_tokens: i,
@@ -328,6 +414,7 @@ pub async fn translate_stream(
                     _ => None,
                 },
             });
+
             return Ok(());
         }
     }
@@ -502,7 +589,7 @@ pub async fn translate_stream(
 
             // Send Completed event
             let _ = on_event.send(TranslateStreamEvent::Completed {
-                full_text,
+                full_text: full_text.clone(),
                 token_usage: match (input_tokens, output_tokens) {
                     (Some(i), Some(o)) => Some(TokenUsage {
                         input_tokens: i,
