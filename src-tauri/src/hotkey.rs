@@ -405,6 +405,8 @@ fn get_clipboard_text() -> Result<String, String> {
     use std::process::Command;
 
     let output = Command::new("pbpaste")
+        .env("LANG", "en_US.UTF-8")
+        .env("LC_ALL", "en_US.UTF-8")
         .output()
         .map_err(|e| e.to_string())?;
 
