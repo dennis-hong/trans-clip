@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Event as TauriEvent } from "@tauri-apps/api/event";
 import { useClipboardStore } from "@/store";
+import { useWindowDrag } from "@/hooks/useWindowDrag";
 import { PostItCard } from "./PostItCard";
 import { CreatePostItCard } from "./CreatePostItCard";
 import { Toast } from "@/components/common";
@@ -67,8 +68,20 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [monitors, setMonitors] = useState<MonitorInfo[]>([]);
   const [currentMonitor, setCurrentMonitor] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const { handleDragStart } = useWindowDrag({
+    onDragEnd: async () => {
+      try {
+        const currentIdx = await invoke<number>("get_current_monitor_index");
+        setCurrentMonitor(currentIdx);
+        const win = getCurrentWindow();
+        const size = await win.outerSize();
+        const scaleFactor = await win.scaleFactor();
+        lastSavedWidthRef.current = Math.round(size.width / scaleFactor);
+      } catch (err) {
+        console.error("Failed to update monitor after drag:", err);
+      }
+    },
+  });
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastSavedWidthRef = useRef<number>(0);
   const resizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -471,62 +484,6 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
     await updateDrawerMode("expanded");
   };
 
-  // Drag handling for window movement (only horizontal)
-  const handleDragStart = (e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest("button, input")) return;
-    setIsDragging(true);
-    setDragStart({ x: e.screenX, y: e.screenY });
-  };
-
-  const handleDragMove = useCallback(
-    async (e: MouseEvent) => {
-      if (!isDragging) return;
-
-      const deltaX = e.screenX - dragStart.x;
-      const deltaY = e.screenY - dragStart.y;
-
-      try {
-        const pos = await invoke<{ x: number; y: number }>("get_window_position");
-        await invoke("set_window_position", {
-          x: pos.x + deltaX,
-          y: pos.y + deltaY,
-        });
-        setDragStart({ x: e.screenX, y: e.screenY });
-      } catch (err) {
-        console.error("Failed to move window:", err);
-      }
-    },
-    [isDragging, dragStart]
-  );
-
-  const handleDragEnd = useCallback(async () => {
-    setIsDragging(false);
-    try {
-      await invoke("snap_to_edge", { threshold: 50 });
-      // Update current monitor index after snapping
-      const currentIdx = await invoke<number>("get_current_monitor_index");
-      setCurrentMonitor(currentIdx);
-
-      // Update lastSavedWidthRef in case monitor changed
-      const window = getCurrentWindow();
-      const size = await window.outerSize();
-      const scaleFactor = await window.scaleFactor();
-      lastSavedWidthRef.current = Math.round(size.width / scaleFactor);
-    } catch (err) {
-      console.error("Failed to snap to edge:", err);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (isDragging) {
-      window.addEventListener("mousemove", handleDragMove);
-      window.addEventListener("mouseup", handleDragEnd);
-    }
-    return () => {
-      window.removeEventListener("mousemove", handleDragMove);
-      window.removeEventListener("mouseup", handleDragEnd);
-    };
-  }, [isDragging, handleDragMove, handleDragEnd]);
 
   // Horizontal scroll with mouse wheel
   const handleWheel = (e: React.WheelEvent) => {

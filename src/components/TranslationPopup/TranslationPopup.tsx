@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslationStream } from "@/hooks/useTranslationStream";
+import { useWindowDrag } from "@/hooks/useWindowDrag";
 import { useClipboardStore } from "@/store";
 import { CLAUDE_MODELS, type ClaudeModel } from "@/types";
 
@@ -24,6 +25,7 @@ export function TranslationPopup({
     error,
   } = useTranslationStream();
   const { createItem } = useClipboardStore();
+  const { handleDragStart } = useWindowDrag();
   const [editableText, setEditableText] = useState(sourceText);
   const [isSaved, setIsSaved] = useState(false);
   const [selectedModel, setSelectedModel] = useState<ClaudeModel | undefined>(undefined);
@@ -121,8 +123,11 @@ export function TranslationPopup({
 
   return (
     <div className="flex flex-col h-full w-full">
-      {/* Header - DrawerPanel과 동일한 스타일 */}
-      <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-200/50">
+      {/* Header - Draggable area */}
+      <div
+        className="flex items-center gap-3 px-4 py-2 cursor-move select-none border-b border-gray-200/50"
+        onMouseDown={handleDragStart}
+      >
         {/* Back button */}
         <button
           onClick={onClose}
