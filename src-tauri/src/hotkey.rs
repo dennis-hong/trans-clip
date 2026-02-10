@@ -202,11 +202,14 @@ mod macos {
             // Cmd+Shift+V detected - show clipboard history
             if is_cmd_pressed && is_shift_pressed && is_v_key {
                 log::info!("Cmd+Shift+V detected! Showing clipboard history");
-                
+
                 // Reset timers to prevent interference
                 LAST_CMD_C_TIME.store(0, Ordering::SeqCst);
                 LAST_CMD_D_TIME.store(0, Ordering::SeqCst);
-                
+
+                // Save the frontmost app before our popup steals focus
+                crate::commands::clipboard::save_frontmost_app();
+
                 thread::spawn(|| {
                     trigger_show_history();
                 });
@@ -228,6 +231,8 @@ mod macos {
                     LAST_CMD_C_TIME.store(0, Ordering::SeqCst);
 
                     // Small delay to let the clipboard update from the copy action
+                    // Save the frontmost app before our popup steals focus
+                    crate::commands::clipboard::save_frontmost_app();
                     thread::spawn(|| {
                         thread::sleep(std::time::Duration::from_millis(100));
                         trigger_translation_or_history();
@@ -249,6 +254,8 @@ mod macos {
                     LAST_CMD_D_TIME.store(0, Ordering::SeqCst);
 
                     // Small delay then trigger polish
+                    // Save the frontmost app before our popup steals focus
+                    crate::commands::clipboard::save_frontmost_app();
                     thread::spawn(|| {
                         thread::sleep(std::time::Duration::from_millis(100));
                         trigger_polish();

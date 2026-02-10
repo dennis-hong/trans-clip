@@ -72,12 +72,14 @@ export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupPro
     const textToReplace = fullText || streamedText;
     if (textToReplace) {
       try {
-        await invoke("hide_translation_popup");
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        // Activate previous app and paste BEFORE hiding the popup.
+        // If we hide first, macOS auto-focuses another app, causing focus race conditions.
         const response = await invoke<{
           success: boolean;
           error?: { code: string; message: string };
         }>("paste_text", { text: textToReplace });
+        // Hide the popup after paste is done
+        await invoke("hide_translation_popup");
         if (!response.success && response.error) {
           console.error(
             "Paste failed:",

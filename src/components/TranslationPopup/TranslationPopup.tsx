@@ -58,12 +58,11 @@ export function TranslationPopup({
     const textToReplace = fullText || streamedText;
     if (textToReplace) {
       try {
-        // First hide the popup to return focus to the original app
-        await invoke("hide_translation_popup");
-        // Give the original app time to regain focus (increased delay)
-        await new Promise(resolve => setTimeout(resolve, 300));
-        // Now simulate paste in the original app
+        // Activate previous app and paste BEFORE hiding the popup.
+        // If we hide first, macOS auto-focuses another app, causing focus race conditions.
         const response = await invoke<{ success: boolean; error?: { code: string; message: string } }>("paste_text", { text: textToReplace });
+        // Hide the popup after paste is done
+        await invoke("hide_translation_popup");
         if (!response.success && response.error) {
           console.error("Paste failed:", response.error.code, response.error.message);
         }
