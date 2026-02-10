@@ -120,6 +120,8 @@ export function useTranslationStream(
             case "error":
               receivedFinalEventRef.current = true;
               setError(event.data.message);
+              setStreamedText("");
+              setFullText("");
               setIsStreaming(false);
               break;
           }

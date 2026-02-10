@@ -115,13 +115,15 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Initialize popup position from settings
+            // Initialize popup position from settings and migrate API key to Keychain
             {
                 let state = app.state::<AppState>();
                 let db = tauri::async_runtime::block_on(state.db.lock());
                 if let Ok(settings) = tauri::async_runtime::block_on(db.get_settings()) {
                     hotkey::set_popup_position(&settings.popup_position);
                 }
+                // Migrate API key from SQLite to Keychain (backward compat)
+                tauri::async_runtime::block_on(keychain::migrate_api_key_from_db(&db));
             }
 
             // Initialize and start hotkey monitoring (Cmd+C+C detection)

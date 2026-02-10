@@ -19,8 +19,15 @@ function App() {
   const prevAccessibilityRef = useRef<boolean | null>(null);
 
   // Check accessibility permission on mount and detect changes
+  // Uses exponential backoff: 2s → 4s → 8s → ... → 30s max, stops after 3 minutes
   useEffect(() => {
     if (hasAccessibility === true && !showRestartDialog) return;
+
+    let timeoutId: ReturnType<typeof setTimeout>;
+    let elapsedMs = 0;
+    const MAX_POLL_MS = 3 * 60 * 1000; // Stop polling after 3 minutes
+    const MAX_INTERVAL_MS = 30_000;
+    let currentInterval = 2000;
 
     const checkPermission = async () => {
       try {
@@ -33,16 +40,24 @@ function App() {
 
         prevAccessibilityRef.current = result.granted;
         setHasAccessibility(result.granted);
+
+        // Stop polling once granted
+        if (result.granted) return;
       } catch (err) {
         console.error("Failed to check accessibility permission:", err);
         setHasAccessibility(false);
         prevAccessibilityRef.current = false;
       }
+
+      elapsedMs += currentInterval;
+      if (elapsedMs < MAX_POLL_MS) {
+        currentInterval = Math.min(currentInterval * 2, MAX_INTERVAL_MS);
+        timeoutId = setTimeout(checkPermission, currentInterval);
+      }
     };
 
     checkPermission();
-    const interval = setInterval(checkPermission, 2000);
-    return () => clearInterval(interval);
+    return () => clearTimeout(timeoutId);
   }, [hasAccessibility, showRestartDialog]);
 
   // Handle app restart

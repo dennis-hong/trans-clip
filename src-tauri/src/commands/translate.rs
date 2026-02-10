@@ -1,4 +1,5 @@
 use crate::database::TranslationRow;
+use crate::keychain;
 use crate::AppState;
 use futures_util::StreamExt;
 use tauri::ipc::Channel;
@@ -132,9 +133,9 @@ pub async fn translate(
     let db = state.db.lock().await;
     let settings = db.get_settings().await.map_err(|e| e.to_string())?;
 
-    // Get API key from database
-    let api_key = match &settings.api_key {
-        Some(key) if !key.is_empty() => key.clone(),
+    // Get API key from Keychain (with SQLite fallback)
+    let api_key = match keychain::resolve_api_key(&settings.api_key) {
+        Some(key) => key,
         _ => {
             return Ok(TranslateResponse {
                 success: false,
@@ -359,9 +360,9 @@ pub async fn translate_stream(
     let db = state.db.lock().await;
     let settings = db.get_settings().await.map_err(|e| e.to_string())?;
 
-    // Get API key from database
-    let api_key = match &settings.api_key {
-        Some(key) if !key.is_empty() => key.clone(),
+    // Get API key from Keychain (with SQLite fallback)
+    let api_key = match keychain::resolve_api_key(&settings.api_key) {
+        Some(key) => key,
         _ => {
             let _ = on_event.send(TranslateStreamEvent::Error {
                 code: "INVALID_API_KEY".to_string(),

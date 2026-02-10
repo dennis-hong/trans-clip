@@ -38,6 +38,7 @@ cocoa = "0.26"
 objc = "0.2"
 core-graphics = "0.24"
 core-foundation = "0.10"
+security-framework = "2"
 
 [profile.release]
 panic = "abort"

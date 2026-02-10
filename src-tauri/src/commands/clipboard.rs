@@ -117,11 +117,15 @@ pub async fn create_clipboard_item(
         return Err("Content is too long (max 50000 characters)".to_string());
     }
 
-    // Generate content preview (first 100 chars)
-    let content_preview = if content.len() > 100 {
-        format!("{}...", &content[..100])
-    } else {
-        content.clone()
+    // Generate content preview (first 100 chars, UTF-8 safe)
+    let content_preview = {
+        let char_count = content.chars().count();
+        if char_count > 100 {
+            let preview: String = content.chars().take(100).collect();
+            format!("{}...", preview)
+        } else {
+            content.clone()
+        }
     };
 
     // Calculate metadata
@@ -155,11 +159,15 @@ pub async fn update_clipboard_item(
         return Err("Content is too long (max 50000 characters)".to_string());
     }
 
-    // Generate content preview (first 100 chars)
-    let content_preview = if content.len() > 100 {
-        format!("{}...", &content[..100])
-    } else {
-        content.clone()
+    // Generate content preview (first 100 chars, UTF-8 safe)
+    let content_preview = {
+        let char_count = content.chars().count();
+        if char_count > 100 {
+            let preview: String = content.chars().take(100).collect();
+            format!("{}...", preview)
+        } else {
+            content.clone()
+        }
     };
 
     // Calculate metadata
@@ -208,9 +216,10 @@ pub async fn set_clipboard(text: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn paste_text(state: State<'_, AppState>, text: String) -> Result<PasteResponse, String> {
+    let text_preview: String = text.chars().take(50).collect();
     log::info!(
         "paste_text: Setting clipboard with text: '{}'",
-        &text[..text.len().min(50)]
+        text_preview
     );
 
     // Get paste delay from settings
@@ -238,9 +247,10 @@ pub async fn paste_text(state: State<'_, AppState>, text: String) -> Result<Past
         use std::process::Command;
         if let Ok(output) = Command::new("pbpaste").output() {
             let clipboard_content = String::from_utf8_lossy(&output.stdout);
+            let verify_preview: String = clipboard_content.chars().take(50).collect();
             log::info!(
                 "paste_text: Clipboard verification: '{}'",
-                &clipboard_content[..clipboard_content.len().min(50)]
+                verify_preview
             );
             if clipboard_content != text {
                 log::warn!("paste_text: Clipboard content mismatch!");

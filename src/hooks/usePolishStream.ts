@@ -76,6 +76,8 @@ export function usePolishStream(): UsePolishStreamReturn {
               break;
             case "error":
               setError(event.data.message);
+              setStreamedText("");
+              setFullText("");
               setIsStreaming(false);
               break;
           }

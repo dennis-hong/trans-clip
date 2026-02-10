@@ -62,10 +62,33 @@ pub async fn update_settings(
 
 #[tauri::command]
 pub async fn get_api_key(state: State<'_, AppState>) -> Result<ApiKeyStatus, String> {
+    // Try Keychain first
+    match keychain::get_api_key_from_keychain() {
+        Ok(Some(_)) => {
+            log::info!("get_api_key: found in Keychain");
+            return Ok(ApiKeyStatus {
+                exists: true,
+                is_valid: None,
+                last_validated: None,
+            });
+        }
+        Ok(None) => {}
+        Err(e) => {
+            log::warn!("Keychain read failed, falling back to SQLite: {}", e);
+        }
+    }
+
+    // Fallback to SQLite (backward compat) and migrate if found
     let db = state.db.lock().await;
     let api_key = db.get_api_key().await.map_err(|e| e.to_string())?;
     let exists = api_key.is_some();
-    log::info!("get_api_key called, exists: {}", exists);
+
+    if exists {
+        // Trigger migration in the background
+        keychain::migrate_api_key_from_db(&db).await;
+    }
+
+    log::info!("get_api_key: exists={} (from SQLite fallback)", exists);
     Ok(ApiKeyStatus {
         exists,
         is_valid: None,
@@ -100,10 +123,14 @@ pub async fn set_api_key(
     };
 
     if is_valid {
-        let db = state.db.lock().await;
-        match db.set_api_key(&api_key).await {
-            Ok(_) => {
-                log::info!("API key saved successfully to database");
+        // Store in Keychain
+        match keychain::store_api_key(&api_key) {
+            Ok(()) => {
+                // Clear from SQLite if it was stored there (backward compat cleanup)
+                let db = state.db.lock().await;
+                let _ = db.delete_api_key().await;
+
+                log::info!("API key saved to Keychain");
                 Ok(SetApiKeyResponse {
                     success: true,
                     is_valid: true,
@@ -111,8 +138,16 @@ pub async fn set_api_key(
                 })
             }
             Err(e) => {
-                log::error!("Failed to save API key: {}", e);
-                Err(e.to_string())
+                log::error!("Failed to save API key to Keychain: {}", e);
+                // Fallback: save to SQLite if Keychain fails
+                let db = state.db.lock().await;
+                db.set_api_key(&api_key).await.map_err(|e| e.to_string())?;
+                log::warn!("API key saved to SQLite as Keychain fallback");
+                Ok(SetApiKeyResponse {
+                    success: true,
+                    is_valid: true,
+                    error: None,
+                })
             }
         }
     } else {
@@ -130,18 +165,19 @@ pub async fn set_api_key(
 
 #[tauri::command]
 pub async fn delete_api_key(state: State<'_, AppState>) -> Result<DeleteResponse, String> {
-    let db = state.db.lock().await;
-    match db.delete_api_key().await {
-        Ok(_) => Ok(DeleteResponse {
-            success: true,
-            error: None,
-        }),
-        Err(e) => Ok(DeleteResponse {
-            success: false,
-            error: Some(ErrorDetail {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            }),
-        }),
+    // Delete from Keychain
+    if let Err(e) = keychain::delete_api_key_from_keychain() {
+        log::warn!("Failed to delete from Keychain: {}", e);
     }
+
+    // Also clear from SQLite (backward compat cleanup)
+    let db = state.db.lock().await;
+    if let Err(e) = db.delete_api_key().await {
+        log::warn!("Failed to clear API key from SQLite: {}", e);
+    }
+
+    Ok(DeleteResponse {
+        success: true,
+        error: None,
+    })
 }
