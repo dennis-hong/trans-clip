@@ -158,7 +158,7 @@ mod macos {
 
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_millis() as u64;
 
             let interval = DOUBLE_PRESS_INTERVAL_MS.load(Ordering::SeqCst);

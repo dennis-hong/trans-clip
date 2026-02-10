@@ -36,7 +36,7 @@ pub fn run() {
             let db_path = app_handle
                 .path()
                 .app_data_dir()
-                .expect("Failed to get app data dir")
+                .map_err(|e| format!("Failed to get app data dir: {}", e))?
                 .join("transclip.db");
 
             // Ensure directory exists
@@ -45,8 +45,9 @@ pub fn run() {
             }
 
             let db = tauri::async_runtime::block_on(async {
-                Database::new(&db_path).await.expect("Failed to initialize database")
-            });
+                Database::new(&db_path).await
+            })
+            .map_err(|e| format!("Failed to initialize database: {}", e))?;
 
             app.manage(AppState {
                 db: Arc::new(Mutex::new(db)),
@@ -60,15 +61,17 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&show_item, &settings_item, &feedback_item, &quit_item])?;
 
             // Load tray icon from file
-            let icon_path = app
+            let icon = app
                 .path()
                 .resource_dir()
-                .expect("Failed to get resource dir")
-                .join("icons/32x32.png");
-            let icon = Image::from_path(&icon_path).unwrap_or_else(|_| {
-                // Fallback to embedded icon if file not found
-                Image::from_bytes(include_bytes!("../icons/32x32.png")).expect("Failed to load embedded icon")
-            });
+                .ok()
+                .map(|dir| dir.join("icons/32x32.png"))
+                .and_then(|path| Image::from_path(&path).ok())
+                .or_else(|| {
+                    // Fallback to embedded icon if file not found
+                    Image::from_bytes(include_bytes!("../icons/32x32.png")).ok()
+                })
+                .ok_or("Failed to load tray icon from file or embedded resource")?;
 
             let _tray = TrayIconBuilder::new()
                 .icon(icon)
@@ -118,12 +121,14 @@ pub fn run() {
             // Initialize popup position from settings and migrate API key to Keychain
             {
                 let state = app.state::<AppState>();
-                let db = tauri::async_runtime::block_on(state.db.lock());
-                if let Ok(settings) = tauri::async_runtime::block_on(db.get_settings()) {
-                    hotkey::set_popup_position(&settings.popup_position);
-                }
-                // Migrate API key from SQLite to Keychain (backward compat)
-                tauri::async_runtime::block_on(keychain::migrate_api_key_from_db(&db));
+                tauri::async_runtime::block_on(async {
+                    let db = state.db.lock().await;
+                    if let Ok(settings) = db.get_settings().await {
+                        hotkey::set_popup_position(&settings.popup_position);
+                    }
+                    // Migrate API key from SQLite to Keychain (backward compat)
+                    keychain::migrate_api_key_from_db(&db).await;
+                });
             }
 
             // Initialize and start hotkey monitoring (Cmd+C+C detection)
@@ -213,7 +218,10 @@ pub fn run() {
             commands::window::open_postit_editor,
         ])
         .build(tauri::generate_context!())
-        .expect("error while building tauri application")
+        .unwrap_or_else(|e| {
+            log::error!("Failed to build Tauri application: {}", e);
+            panic!("Failed to build Tauri application: {}", e);
+        })
         .run(|app_handle, event| {
             match event {
                 RunEvent::ExitRequested { api, .. } => {

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useClipboardStore } from "@/store";
@@ -17,14 +17,16 @@ export function HistoryPanel() {
     fetchHistory();
   }, [fetchHistory]);
 
-  // Listen for clipboard changes
+  // Listen for clipboard changes (debounced to avoid redundant fetches)
+  const clipboardDebounceRef = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
     const unlisten = listen<ClipboardChangedPayload>("clipboard_changed", () => {
-      // Refresh history when clipboard changes
-      fetchHistory();
+      clearTimeout(clipboardDebounceRef.current);
+      clipboardDebounceRef.current = setTimeout(() => fetchHistory(), 100);
     });
 
     return () => {
+      clearTimeout(clipboardDebounceRef.current);
       unlisten.then((fn) => fn());
     };
   }, [fetchHistory]);

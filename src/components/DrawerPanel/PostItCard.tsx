@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { memo, useCallback, useState } from "react";
 import type { ClipboardItem } from "@/types";
 
 interface PostItCardProps {
@@ -33,7 +33,7 @@ function getColorFromId(id: string): string {
   return COLORS[colorIndex] || "bg-yellow-100 border-yellow-300";
 }
 
-export function PostItCard({ item, index, color, onCopy, onPaste, onDelete, onTogglePin, onTranslate, onPolish, onEdit, showPasteButton }: PostItCardProps) {
+export const PostItCard = memo(function PostItCard({ item, index, color, onCopy, onPaste, onDelete, onTogglePin, onTranslate, onPolish, onEdit, showPasteButton }: PostItCardProps) {
   const [isHovered, setIsHovered] = useState(false);
   const cardColor = color || getColorFromId(item.id);
 
@@ -300,4 +300,4 @@ export function PostItCard({ item, index, color, onCopy, onPaste, onDelete, onTo
       </div>
     </div>
   );
-}
+});

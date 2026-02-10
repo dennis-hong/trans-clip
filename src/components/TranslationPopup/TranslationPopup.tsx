@@ -62,7 +62,6 @@ export function TranslationPopup({
         await new Promise(resolve => setTimeout(resolve, 300));
         // Now simulate paste in the original app
         const response = await invoke<{ success: boolean; error?: { code: string; message: string } }>("paste_text", { text: textToReplace });
-        console.log("paste_text response:", response);
         if (!response.success && response.error) {
           console.error("Paste failed:", response.error.code, response.error.message);
         }

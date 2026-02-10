@@ -75,6 +75,10 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
 
   const { items, isLoading, fetchHistory, deleteItem, togglePin } = useClipboardStore();
 
+  // Keep a ref to items for keyboard handler (avoids re-registering listener on every items change)
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+
   // Fetch history on mount
   useEffect(() => {
     fetchHistory();
@@ -130,7 +134,6 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
           try {
             await invoke("save_window_width_for_monitor", { width: logicalWidth });
             lastSavedWidthRef.current = logicalWidth;
-            console.log("Saved window width for current monitor:", logicalWidth);
           } catch (err) {
             console.error("Failed to save window width:", err);
           }
@@ -148,12 +151,15 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
     };
   }, []);
 
-  // Listen for clipboard changes
+  // Listen for clipboard changes (debounced to avoid redundant fetches)
+  const clipboardDebounceRef = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
     const unlisten = listen<ClipboardChangedPayload>("clipboard_changed", () => {
-      fetchHistory();
+      clearTimeout(clipboardDebounceRef.current);
+      clipboardDebounceRef.current = setTimeout(() => fetchHistory(), 100);
     });
     return () => {
+      clearTimeout(clipboardDebounceRef.current);
       unlisten.then((fn) => fn());
     };
   }, [fetchHistory]);
@@ -253,9 +259,10 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
           }
         }
 
-        // Sort items: pinned first, then unpinned
-        const pinnedItems = items.filter((item) => item.isPinned);
-        const unpinnedItems = items.filter((item) => !item.isPinned);
+        // Sort items: pinned first, then unpinned (use ref to avoid dep on items array)
+        const currentItems = itemsRef.current;
+        const pinnedItems = currentItems.filter((item) => item.isPinned);
+        const unpinnedItems = currentItems.filter((item) => !item.isPinned);
         const sortedItemsList = [...pinnedItems, ...unpinnedItems];
 
         // Get item index from number key (use e.code for consistency)
@@ -308,7 +315,7 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [monitors.length, currentView, items, isStealthMode, onClose, onTranslate, onPolish, handleCreateNewItem]);
+  }, [monitors.length, currentView, isStealthMode, onClose, onTranslate, onPolish, handleCreateNewItem]);
 
   const loadMonitors = async () => {
     try {

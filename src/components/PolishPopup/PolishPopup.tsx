@@ -76,7 +76,6 @@ export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupPro
           success: boolean;
           error?: { code: string; message: string };
         }>("paste_text", { text: textToReplace });
-        console.log("paste_text response:", response);
         if (!response.success && response.error) {
           console.error(
             "Paste failed:",

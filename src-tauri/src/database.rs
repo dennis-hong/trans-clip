@@ -500,15 +500,21 @@ impl Database {
         sort_by: &str,
         sort_order: &str,
     ) -> Result<Vec<GlossaryEntryRow>, sqlx::Error> {
-        let order_clause = format!(
-            "{} {}",
-            match sort_by {
-                "usageCount" => "usage_count",
-                "createdAt" => "created_at",
-                _ => "keyword",
-            },
-            if sort_order == "desc" { "DESC" } else { "ASC" }
-        );
+        // Whitelist-validated ORDER BY to prevent SQL injection
+        let column = match sort_by {
+            "usageCount" => "usage_count",
+            "createdAt" => "created_at",
+            "keyword" => "keyword",
+            other => {
+                log::warn!("Invalid sort_by value '{}', defaulting to 'keyword'", other);
+                "keyword"
+            }
+        };
+        let direction = match sort_order {
+            "desc" | "DESC" => "DESC",
+            _ => "ASC",
+        };
+        let order_clause = format!("{} {}", column, direction);
 
         let entries = if let Some(query) = search_query {
             let search_pattern = format!("%{}%", query);

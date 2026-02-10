@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from "react";
-import { invoke, Channel } from "@tauri-apps/api/core";
+import { Channel } from "@tauri-apps/api/core";
+import { invokeWithTimeout } from "@/utils/invokeWithTimeout";
 import type { TranslateStreamEvent, Language, TranslateResponse } from "@/types";
 
 interface UseTranslationStreamOptions {
@@ -54,7 +55,7 @@ export function useTranslationStream(
 
       try {
         // Fast path: if cached, bypass streaming channel entirely.
-        const cached = await invoke<TranslateResponse | null>("get_cached_translation", {
+        const cached = await invokeWithTimeout<TranslateResponse | null>("get_cached_translation", {
           text,
           sourceLanguage:
             options.sourceLanguage === "auto"
@@ -100,7 +101,7 @@ export function useTranslationStream(
           receivedAnyEventRef.current = true;
           switch (event.event) {
             case "started":
-              setDetectedLanguage(event.data.detectedLanguage as Language | null);
+              setDetectedLanguage(event.data.detectedLanguage);
               setFromCache(event.data.fromCache);
               setGlossaryApplied(event.data.glossaryApplied);
               break;
@@ -127,7 +128,7 @@ export function useTranslationStream(
           }
         };
 
-        await invoke("translate_stream", {
+        await invokeWithTimeout("translate_stream", {
           text,
           sourceLanguage:
             options.sourceLanguage === "auto"

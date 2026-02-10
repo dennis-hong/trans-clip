@@ -317,7 +317,7 @@ export type TranslateStreamEvent =
   | {
       event: "started";
       data: {
-        detectedLanguage: string | null;
+        detectedLanguage: Language | null;
         fromCache: boolean;
         glossaryApplied: string[];
       };
@@ -336,7 +336,7 @@ export type TranslateStreamEvent =
  * 다듬기 스트리밍 이벤트
  */
 export type PolishStreamEvent =
-  | { event: "started"; data: { detectedLanguage: string | null } }
+  | { event: "started"; data: { detectedLanguage: Language | null } }
   | { event: "delta"; data: { text: string } }
   | {
       event: "completed";

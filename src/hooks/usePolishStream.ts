@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from "react";
-import { invoke, Channel } from "@tauri-apps/api/core";
+import { Channel } from "@tauri-apps/api/core";
+import { invokeWithTimeout } from "@/utils/invokeWithTimeout";
 import type { PolishStreamEvent, PolishContext, PolishChannel, PolishOption, Language } from "@/types";
 
 interface UsePolishStreamReturn {
@@ -60,7 +61,7 @@ export function usePolishStream(): UsePolishStreamReturn {
         channel.onmessage = (event: PolishStreamEvent) => {
           switch (event.event) {
             case "started":
-              setDetectedLanguage(event.data.detectedLanguage as Language | null);
+              setDetectedLanguage(event.data.detectedLanguage);
               break;
             case "delta":
               accumulatedTextRef.current += event.data.text;
@@ -83,7 +84,7 @@ export function usePolishStream(): UsePolishStreamReturn {
           }
         };
 
-        await invoke("polish_stream", {
+        await invokeWithTimeout("polish_stream", {
           text,
           context,
           channel: polishChannel,

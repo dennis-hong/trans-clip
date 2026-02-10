@@ -38,31 +38,24 @@ export function PostItEditorWindow() {
     if (!trimmedContent || isSaving) return;
 
     setIsSaving(true);
-    console.log("Starting save, mode:", params.mode, "itemId:", params.itemId);
 
     try {
       if (params.mode === "edit" && params.itemId) {
-        console.log("Updating item:", params.itemId);
-        const result = await invoke("update_clipboard_item", {
+        await invoke("update_clipboard_item", {
           id: params.itemId,
           content: trimmedContent,
         });
-        console.log("Update result:", result);
       } else {
-        console.log("Creating new item");
-        const result = await invoke("create_clipboard_item", {
+        await invoke("create_clipboard_item", {
           content: trimmedContent,
         });
-        console.log("Create result:", result);
       }
 
       // Emit event to notify main window
-      console.log("Emitting postit_saved event");
       await emit("postit_saved", { mode: params.mode, itemId: params.itemId });
 
       // Close this window after a small delay to allow WebKit to finish processing
       // This prevents a race condition that can cause WebKit crashes
-      console.log("Closing window");
       const currentWindow = getCurrentWindow();
       await new Promise((resolve) => setTimeout(resolve, 50));
       await currentWindow.close();
