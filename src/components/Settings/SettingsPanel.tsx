@@ -104,7 +104,7 @@ export function SettingsPanel() {
             >
               <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (가장 빠름)</option>
               <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5 (균형)</option>
-              <option value="claude-opus-4-5-20251101">Claude Opus 4.5 (최고 품질)</option>
+              <option value="claude-opus-4-6">Claude Opus 4.6 (최고 품질)</option>
             </select>
           </div>
 
