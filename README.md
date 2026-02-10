@@ -2,7 +2,7 @@
 
 클립보드의 텍스트를 Claude AI를 사용해 자동으로 번역해주는 macOS 앱입니다.
 
-![TransClip Screenshot](https://img.shields.io/badge/Platform-macOS-blue) ![Version](https://img.shields.io/badge/Version-0.1.9-green) ![License](https://img.shields.io/badge/License-MIT-yellow)
+![TransClip Screenshot](https://img.shields.io/badge/Platform-macOS-blue) ![Version](https://img.shields.io/badge/Version-0.1.10-green) ![License](https://img.shields.io/badge/License-MIT-yellow)
 
 ## ✨ 주요 기능
 
@@ -17,13 +17,13 @@
 
 ### 1. 다운로드
 
-[**📦 최신 버전 다운로드 (v0.1.9)**](https://github.com/dennis-hong/trans-clip/releases/latest)
+[**📦 최신 버전 다운로드 (v0.1.10)**](https://github.com/dennis-hong/trans-clip/releases/latest)
 
-위 링크에서 `TransClip_0.1.9_aarch64.app.zip` 파일을 다운로드하세요.
+위 링크에서 `TransClip_0.1.10_aarch64.app.zip` 파일을 다운로드하세요.
 
 ### 2. 설치 방법
 
-1. 다운로드한 `TransClip_0.1.9_aarch64.app.zip` 파일의 압축을 해제합니다
+1. 다운로드한 `TransClip_0.1.10_aarch64.app.zip` 파일의 압축을 해제합니다
 2. `TransClip.app`을 **Applications** 폴더로 드래그하여 이동합니다
 3. **처음 실행 전** 터미널에서 다음 명령어를 실행합니다 (quarantine 속성 제거):
 
