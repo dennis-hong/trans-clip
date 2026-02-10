@@ -17,17 +17,53 @@ pub fn set_popup_position(_position: &str) {
 }
 
 /// Show the window and set focus
-/// Before showing, update the monitor index based on cursor position
-/// The window position is managed by set_drawer_mode which keeps it at bottom center
+/// Before showing, update the monitor index based on cursor position and
+/// set the window position to bottom-center of the target monitor.
+/// This ensures the window is never shown at a stale or off-screen position.
 pub fn show_window_at_position(window: &tauri::WebviewWindow) {
+    use crate::utils::monitor::{calculate_adaptive_width, sort_monitors_by_position};
+
     // Update monitor index based on cursor position before showing
     crate::commands::window::update_monitor_from_cursor(window.app_handle());
 
-    // Just show and focus the window - position is handled by set_drawer_mode
+    // Calculate and set position before showing
+    if let Ok(monitors) = window.app_handle().available_monitors() {
+        let sorted = sort_monitors_by_position(monitors.iter());
+        if let Some(monitor) = sorted.first() {
+            let mon_pos = monitor.position();
+            let mon_size = monitor.size();
+            let scale = monitor.scale_factor();
+
+            let mon_logical_width = (mon_size.width as f64 / scale) as i32;
+            let mon_logical_height = (mon_size.height as f64 / scale) as i32;
+
+            let win_width = calculate_adaptive_width(mon_logical_width);
+            // Use default expanded height (matches set_drawer_mode "expanded")
+            let win_height = 280;
+
+            let x = mon_pos.x + (mon_logical_width - win_width) / 2;
+            let y = mon_pos.y + mon_logical_height - win_height;
+
+            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                width: win_width as f64,
+                height: win_height as f64,
+            }));
+            let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition {
+                x: x as f64,
+                y: y as f64,
+            }));
+
+            log::info!(
+                "Window positioned at ({}, {}), size {}x{} before showing",
+                x, y, win_width, win_height
+            );
+        }
+    }
+
     let _ = window.show();
     let _ = window.set_focus();
 
-    log::info!("Window shown and focused (monitor updated from cursor)");
+    log::info!("Window shown and focused");
 }
 
 #[derive(Clone, serde::Serialize)]

@@ -18,7 +18,7 @@
         "title": "TransClip",
         "width": 1200,
         "height": 280,
-        "visible": true,
+        "visible": false,
         "skipTaskbar": false,
         "decorations": false,
         "transparent": true,
