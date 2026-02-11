@@ -17,23 +17,31 @@
 
 ### 1. 다운로드
 
-[**📦 최신 버전 다운로드 (v0.1.12)**](https://github.com/dennis-hong/trans-clip/releases/latest)
+[**📦 최신 버전 다운로드**](https://github.com/dennis-hong/trans-clip/releases/latest)
 
-위 링크에서 `TransClip_0.1.12_aarch64.app.zip` 파일을 다운로드하세요.
+위 링크에서 `TransClip_<version>_aarch64.app.zip` 파일을 다운로드하세요.
 
 ### 2. 설치 방법
 
-1. 다운로드한 `TransClip_0.1.12_aarch64.app.zip` 파일의 압축을 해제합니다
+1. 다운로드한 `TransClip_<version>_aarch64.app.zip` 파일의 압축을 해제합니다
 2. `TransClip.app`을 **Applications** 폴더로 드래그하여 이동합니다
-3. **처음 실행 전** 터미널에서 다음 명령어를 실행합니다 (quarantine 속성 제거):
+3. 실행 시 macOS가 앱을 차단하면 터미널에서 다음 명령어를 실행합니다 (quarantine 속성 제거):
 
 ```bash
 xattr -cr /Applications/TransClip.app
 ```
 
 4. 이제 앱을 더블클릭하여 실행할 수 있습니다
+5. 설정 화면의 **업데이트 확인** 버튼으로 최신 버전을 확인할 수 있습니다
 
 > ⚠️ **"수정 또는 손상됨" 오류가 발생하는 경우**: 위의 `xattr -cr` 명령어를 반드시 실행해주세요. 이 앱은 개인 개발자가 만든 앱으로 Apple 공증을 받지 않았기 때문에 macOS가 차단합니다.
+
+### 2-1. 자동 업데이트
+
+- 최초 설치 후에는 앱 내부에서 새 버전을 확인하고 설치할 수 있습니다
+- 업데이트가 있으면 설정 화면 하단에 `새 버전` 배지가 표시되고 `업데이트` 버튼이 활성화됩니다
+- 업데이트 설치가 완료되면 앱이 재시작되며 최신 버전이 적용됩니다
+- 인앱 업데이트 경로로 설치된 경우에는 보통 `xattr -cr`를 매 업데이트마다 다시 실행할 필요가 없습니다
 
 ### 3. 권한 설정
 

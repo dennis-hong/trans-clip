@@ -1,0 +1,126 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release-macos-aarch64:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      RUST_BACKTRACE: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Validate signing key
+        shell: bash
+        run: |
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY secret is not set."
+            exit 1
+          fi
+
+      - name: Validate updater public key
+        shell: bash
+        run: |
+          PUBKEY="$(node -e 'const fs=require("fs");const conf=JSON.parse(fs.readFileSync("src-tauri/tauri.conf.json","utf8"));process.stdout.write(conf?.plugins?.updater?.pubkey ?? "")')"
+          if [ -z "${PUBKEY}" ] || [ "${PUBKEY}" = "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY" ]; then
+            echo "Updater public key is not configured in src-tauri/tauri.conf.json"
+            echo "Set plugins.updater.pubkey to the generated public key before release."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build signed updater artifacts
+        run: pnpm tauri build --target aarch64-apple-darwin
+
+      - name: Prepare release assets
+        id: prep
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME#v}"
+          TAG="${GITHUB_REF_NAME}"
+          BUNDLE_DIR="src-tauri/target/aarch64-apple-darwin/release/bundle/macos"
+          APP_DIR="${BUNDLE_DIR}/TransClip.app"
+          UPDATER_ARCHIVE="${BUNDLE_DIR}/TransClip.app.tar.gz"
+          SIG_FILE="${UPDATER_ARCHIVE}.sig"
+          ZIP_NAME="TransClip_${VERSION}_aarch64.app.zip"
+          ZIP_PATH="${BUNDLE_DIR}/${ZIP_NAME}"
+          LATEST_JSON="${BUNDLE_DIR}/latest.json"
+
+          if [ ! -d "${APP_DIR}" ]; then
+            echo "Missing app bundle: ${APP_DIR}"
+            exit 1
+          fi
+          if [ ! -f "${UPDATER_ARCHIVE}" ]; then
+            echo "Missing updater archive: ${UPDATER_ARCHIVE}"
+            exit 1
+          fi
+          if [ ! -f "${SIG_FILE}" ]; then
+            echo "Missing updater signature: ${SIG_FILE}"
+            exit 1
+          fi
+
+          ditto -c -k --sequesterRsrc --keepParent "${APP_DIR}" "${ZIP_PATH}"
+
+          SIGNATURE="$(tr -d '\n' < "${SIG_FILE}")"
+          PUB_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+          cat > "${LATEST_JSON}" <<EOF
+          {
+            "version": "${VERSION}",
+            "notes": "See release notes on GitHub.",
+            "pub_date": "${PUB_DATE}",
+            "platforms": {
+              "darwin-aarch64": {
+                "signature": "${SIGNATURE}",
+                "url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/TransClip.app.tar.gz"
+              }
+            }
+          }
+          EOF
+
+          {
+            echo "tag=${TAG}"
+            echo "updater_archive=${UPDATER_ARCHIVE}"
+            echo "updater_sig=${SIG_FILE}"
+            echo "latest_json=${LATEST_JSON}"
+            echo "manual_zip=${ZIP_PATH}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.prep.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            ${{ steps.prep.outputs.updater_archive }}
+            ${{ steps.prep.outputs.updater_sig }}
+            ${{ steps.prep.outputs.latest_json }}
+            ${{ steps.prep.outputs.manual_zip }}

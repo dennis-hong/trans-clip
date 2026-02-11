@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useSettingsStore } from "@/store";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { useSettingsStore, useUpdateStore } from "@/store";
 import { ApiKeyInput } from "./ApiKeyInput";
 import type { ClaudeModel, PermissionStatus } from "@/types";
 
@@ -13,6 +14,20 @@ export function SettingsPanel() {
     fetchApiKeyStatus,
     isLoading,
   } = useSettingsStore();
+  const {
+    currentVersion,
+    latestVersion,
+    hasUpdate,
+    isChecking: isCheckingUpdate,
+    isDownloading,
+    progress,
+    error: updateError,
+    initCurrentVersion,
+    checkForUpdate,
+    installUpdate,
+    dismissUpdate,
+    clearError: clearUpdateError,
+  } = useUpdateStore();
 
   const [accessibilityGranted, setAccessibilityGranted] = useState<boolean | null>(null);
 
@@ -29,7 +44,8 @@ export function SettingsPanel() {
     fetchSettings();
     fetchApiKeyStatus();
     checkAccessibilityStatus();
-  }, [fetchSettings, fetchApiKeyStatus]);
+    void initCurrentVersion();
+  }, [fetchSettings, fetchApiKeyStatus, initCurrentVersion]);
 
   const handleModelChange = (model: ClaudeModel) => {
     updateSettings({ preferredModel: model });
@@ -61,6 +77,26 @@ export function SettingsPanel() {
       setTimeout(checkAccessibilityStatus, 1000);
     } catch (err) {
       console.error("Failed to request accessibility:", err);
+    }
+  };
+
+  const handleCheckForUpdate = async () => {
+    clearUpdateError();
+    await checkForUpdate(true);
+  };
+
+  const handleInstallUpdate = async () => {
+    clearUpdateError();
+    const installed = await installUpdate();
+
+    if (!installed) {
+      return;
+    }
+
+    try {
+      await relaunch();
+    } catch (err) {
+      console.error("Failed to relaunch after update:", err);
     }
   };
 
@@ -260,22 +296,79 @@ export function SettingsPanel() {
       </div>
 
       {/* 하단 정보 영역 */}
-      <div className="mt-6 pt-4 border-t border-gray-200 flex items-center justify-between text-xs text-gray-500">
-        <span>TransClip v0.1.6</span>
-        <button
-          type="button"
-          className="flex items-center gap-1 text-gray-500 hover:text-blue-600 transition-colors"
-          onClick={() => {
-            import("@tauri-apps/plugin-shell").then(({ open }) => {
-              open("https://github.com/dennis-hong/trans-clip/issues");
-            });
-          }}
-        >
-          <span>버그 제보 · 기능 제안</span>
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-          </svg>
-        </button>
+      <div className="mt-6 pt-4 border-t border-gray-200 space-y-2 text-xs text-gray-500">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span>TransClip v{currentVersion ?? "..."}</span>
+            {hasUpdate && latestVersion && (
+              <span className="px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 text-[10px] font-medium">
+                새 버전 v{latestVersion}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors disabled:opacity-50"
+              onClick={handleCheckForUpdate}
+              disabled={isCheckingUpdate || isDownloading}
+            >
+              {isCheckingUpdate ? "확인 중..." : "업데이트 확인"}
+            </button>
+
+            {hasUpdate && (
+              <>
+                <button
+                  type="button"
+                  className="px-2 py-1 rounded bg-blue-500 text-white hover:bg-blue-600 transition-colors disabled:opacity-50"
+                  onClick={handleInstallUpdate}
+                  disabled={isDownloading}
+                >
+                  {isDownloading ? `다운로드 중... ${progress}%` : "업데이트"}
+                </button>
+                <button
+                  type="button"
+                  className="px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors disabled:opacity-50"
+                  onClick={dismissUpdate}
+                  disabled={isDownloading}
+                >
+                  나중에
+                </button>
+              </>
+            )}
+
+            <button
+              type="button"
+              className="flex items-center gap-1 text-gray-500 hover:text-blue-600 transition-colors"
+              onClick={() => {
+                import("@tauri-apps/plugin-shell").then(({ open }) => {
+                  open("https://github.com/dennis-hong/trans-clip/issues");
+                });
+              }}
+            >
+              <span>버그 제보 · 기능 제안</span>
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {isDownloading && (
+          <div className="space-y-1">
+            <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+              <div className="h-full bg-blue-500 transition-all" style={{ width: `${progress}%` }} />
+            </div>
+            <p className="text-[10px] text-gray-500">업데이트 다운로드 중... {progress}%</p>
+          </div>
+        )}
+
+        {updateError && (
+          <p className="text-[10px] text-red-600">
+            업데이트 오류: {updateError}
+          </p>
+        )}
       </div>
     </div>
   );

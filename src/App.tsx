@@ -6,6 +6,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { DrawerPanel } from "@/components/DrawerPanel";
 import { TranslationPopup } from "@/components/TranslationPopup";
 import { PolishPopup } from "@/components/PolishPopup";
+import { useUpdateStore } from "@/store";
 import type { DoubleCopyPayload, PolishPayload, ShowHistoryPayload } from "@/types";
 
 type PopupMode = "none" | "translate" | "polish" | "history";
@@ -17,6 +18,7 @@ function App() {
   const [openedFromHistory, setOpenedFromHistory] = useState(false);
   const [showRestartDialog, setShowRestartDialog] = useState(false);
   const prevAccessibilityRef = useRef<boolean | null>(null);
+  const checkForUpdate = useUpdateStore((state) => state.checkForUpdate);
 
   // Check accessibility permission on mount and detect changes
   // Uses exponential backoff: 2s → 4s → 8s → ... → 30s max, stops after 3 minutes
@@ -80,6 +82,17 @@ function App() {
     };
     positionWindow();
   }, []);
+
+  // Check for updates once at startup (non-blocking)
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      void checkForUpdate().catch((err) => {
+        console.error("Failed to check for updates:", err);
+      });
+    }, 3000);
+
+    return () => clearTimeout(timeoutId);
+  }, [checkForUpdate]);
 
   // Note: Keyboard shortcuts for monitor switching are handled in DrawerPanel.tsx
   // to avoid duplicate calls and to update the currentMonitor state

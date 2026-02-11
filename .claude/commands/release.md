@@ -1,124 +1,91 @@
 # TransClip 릴리즈 스킬
 
-이 스킬은 TransClip 앱의 새 버전을 릴리즈합니다.
+이 스킬은 **GitHub Actions 기반 자동 릴리즈**로 TransClip 새 버전을 배포합니다.
 
 ## 입력
 
-- `$ARGUMENTS`: 새 버전 번호 (예: 0.1.7) 또는 "patch", "minor", "major"
+- `$ARGUMENTS`: 새 버전 번호 (예: `0.1.13`) 또는 `patch` / `minor` / `major`
+
+## 사전 준비 (최초 1회 또는 키 교체 시)
+
+1. 업데이터 서명 키를 준비합니다.
+   - 필요 시 생성: `pnpm tauri signer generate -w ~/.tauri/transclip.key`
+2. `src-tauri/tauri.conf.json`의 `plugins.updater.pubkey`를 실제 공개키로 설정합니다.
+   - `REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY` 상태면 워크플로가 실패합니다.
+3. GitHub Repository Secrets에 아래 값을 등록합니다.
+   - `TAURI_SIGNING_PRIVATE_KEY`
+   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (비밀번호를 사용한 경우)
+4. `.github/workflows/release.yml`이 기본 브랜치에 반영되어 있어야 합니다.
 
 ## 실행 단계
 
-### 1. 현재 상태 확인
+### 1) 현재 상태 확인
 
-먼저 다음을 확인하세요:
-- `git log` 또는 `gh release list`로 마지막 릴리즈 태그 확인
-- `git log <last-tag>..HEAD --oneline`으로 릴리즈 이후 변경 사항 확인
-- `src-tauri/tauri.conf.json`에서 현재 버전 확인
+- `git fetch --tags`
+- `gh release list` 또는 `git tag --sort=-v:refname | head`로 마지막 태그 확인
+- `git log <last-tag>..HEAD --oneline`으로 릴리즈 이후 변경사항 확인
+- `src-tauri/tauri.conf.json` 현재 버전 확인
 
-변경 사항이 없으면 "릴리즈할 변경 사항이 없습니다"라고 알리고 중단하세요.
+변경사항이 없으면 "릴리즈할 변경 사항이 없습니다"라고 알리고 중단합니다.
 
-### 2. 버전 결정
+### 2) 버전 결정
 
-`$ARGUMENTS`가 제공된 경우:
-- "patch": 현재 버전의 패치 버전 증가 (0.1.5 → 0.1.6)
-- "minor": 현재 버전의 마이너 버전 증가 (0.1.5 → 0.2.0)
-- "major": 현재 버전의 메이저 버전 증가 (0.1.5 → 1.0.0)
-- 숫자 형식 (예: 0.1.7): 해당 버전 사용
+`$ARGUMENTS` 규칙:
+- `patch`: 패치 버전 증가 (`0.1.12 -> 0.1.13`)
+- `minor`: 마이너 버전 증가 (`0.1.12 -> 0.2.0`)
+- `major`: 메이저 버전 증가 (`0.1.12 -> 1.0.0`)
+- 숫자 형식 (`0.1.13`): 해당 버전 사용
 
-`$ARGUMENTS`가 없으면 patch 버전을 증가시키세요.
+입력이 없으면 `patch`를 사용합니다.
 
-### 3. 버전 파일 업데이트
+### 3) 버전 파일 업데이트
 
-다음 파일들의 버전을 새 버전으로 업데이트:
-- `package.json`: `"version": "X.X.X"`
-- `src-tauri/Cargo.toml`: `version = "X.X.X"`
-- `src-tauri/tauri.conf.json`: `"version": "X.X.X"`
-- `README.md`: 버전 배지와 다운로드 링크의 버전 번호들
+다음 파일 버전을 동일하게 맞춥니다.
+- `package.json`
+- `src-tauri/Cargo.toml`
+- `src-tauri/tauri.conf.json`
+- `README.md` (배지 등 버전 표기가 있는 경우)
 
-### 4. 커밋 및 푸시
+### 4) 커밋/푸시
 
 ```bash
 git add -A
-git commit -m "chore: Bump version to X.X.X
-
-Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
+git commit -m "chore: bump version to X.X.X"
 git push origin main
 ```
 
-### 5. 앱 빌드
+### 5) 릴리즈 태그 생성/푸시
 
 ```bash
-pnpm tauri build
+git tag "vX.X.X"
+git push origin "vX.X.X"
 ```
 
-DMG 생성 실패는 무시하세요 (create-dmg 미설치). `.app` 파일만 있으면 됩니다.
+태그 푸시 시 GitHub Actions `release` 워크플로가 자동 실행됩니다.
 
-### 6. ZIP 압축
+### 6) 워크플로 검증
+
+아래 순서로 배포 결과를 확인합니다.
 
 ```bash
-cd src-tauri/target/release/bundle/macos
-zip -r TransClip_X.X.X_aarch64.app.zip TransClip.app
+gh run list --workflow release --limit 1
+gh run watch <run-id>
+gh release view "vX.X.X" --json url,assets
 ```
 
-### 7. GitHub 릴리즈 생성
+아래 아티팩트가 릴리즈에 업로드되어야 합니다.
+- `TransClip_X.X.X_aarch64.app.zip` (최초 설치용)
+- `TransClip.app.tar.gz` (업데이트용)
+- `TransClip.app.tar.gz.sig` (서명)
+- `latest.json` (업데이터 메타데이터)
 
-`gh release create` 명령으로 릴리즈를 생성하세요.
+추가 검증:
+- `https://github.com/dennis-hong/trans-clip/releases/latest/download/latest.json` 접근 확인
 
-릴리즈 노트 템플릿:
+### 7) 완료 보고
 
-```markdown
-## TransClip vX.X.X 릴리즈
-
-### 변경 사항
-
-[마지막 릴리즈 이후 커밋들을 분석하여 작성]
-- feat: 커밋은 "새로운 기능" 섹션에
-- fix: 커밋은 "버그 수정" 섹션에
-- docs: 커밋은 "문서" 섹션에
-- 기타는 적절한 섹션에
-
----
-
-## 설치 방법
-
-### 1. 다운로드
-
-아래 `TransClip_X.X.X_aarch64.app.zip` 파일을 다운로드합니다.
-
-### 2. 설치
-
-1. 다운로드한 zip 파일의 압축을 해제합니다
-2. `TransClip.app`을 **Applications** 폴더로 이동합니다
-3. **처음 실행 전** 터미널에서 다음 명령어를 실행합니다:
-
-\`\`\`bash
-xattr -cr /Applications/TransClip.app
-\`\`\`
-
-4. 앱을 실행합니다
-
-> ⚠️ **"손상됨" 오류 발생 시**: 위의 `xattr -cr` 명령어를 반드시 실행해주세요.
-
-### 3. 권한 설정 (중요!)
-
-- **접근성 권한**: 시스템 설정 > 개인 정보 보호 및 보안 > 접근성 > TransClip 허용
-- **⚠️ 권한 설정 후 앱을 반드시 재시작해주세요!** (완전히 종료 후 다시 실행)
-- 재시작하지 않으면 `Cmd+C` 두 번, `Cmd+D` 두 번 등의 단축키가 동작하지 않습니다
-
-### 4. API 키 설정
-
-1. [Anthropic Console](https://console.anthropic.com/)에서 Claude API 키 발급
-2. 앱 설정에서 API 키 입력
-
----
-
-## 시스템 요구사항
-
-- macOS 12.0 (Monterey) 이상
-- Apple Silicon (M1/M2/M3/M4)
-- 인터넷 연결 필요
-```
-
-### 8. 완료 보고
-
-릴리즈 URL을 사용자에게 알려주세요.
+- 릴리즈 URL 전달
+- 자동업데이트 동작 체크 결과 전달
+  - 앱 실행
+  - 설정 > 업데이트 확인
+  - 새 버전 감지/설치/재시작 성공 여부
