@@ -214,7 +214,7 @@ pub fn run() {
             // Initialize and start clipboard monitoring
             let clipboard_handle = app_handle.clone();
             let clipboard_monitor = clipboard::ClipboardMonitor::new(clipboard_handle);
-            
+
             if let Err(e) = clipboard_monitor.start() {
                 log::error!("Failed to start clipboard monitor: {}", e);
             } else {
@@ -245,6 +245,7 @@ pub fn run() {
             commands::clipboard::create_clipboard_item,
             commands::clipboard::update_clipboard_item,
             commands::clipboard::set_clipboard,
+            commands::clipboard::hide_and_paste_text,
             commands::clipboard::paste_text,
             // Glossary commands
             commands::glossary::get_glossary_entries,

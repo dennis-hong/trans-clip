@@ -1,5 +1,5 @@
 use crate::AppState;
-use tauri::State;
+use tauri::{Manager, State};
 
 use super::types::{
     ClearHistoryResponse, ClipboardHistoryResponse, ClipboardItemResponse, DeleteResponse,
@@ -273,6 +273,24 @@ pub async fn set_clipboard(text: String) -> Result<(), String> {
         let _ = text;
         Err("Clipboard operations only supported on macOS".to_string())
     }
+}
+
+/// Hide the main window first, then paste text.
+/// This avoids a frontend timing race where hiding the WebView can pause JS
+/// before the subsequent `paste_text` invoke is dispatched.
+#[tauri::command]
+pub async fn hide_and_paste_text(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    text: String,
+) -> Result<PasteResponse, String> {
+    if let Some(window) = app.get_webview_window("main") {
+        if let Err(err) = window.hide() {
+            log::warn!("hide_and_paste_text: failed to hide main window: {}", err);
+        }
+    }
+
+    paste_text(state, text).await
 }
 
 #[tauri::command]

@@ -72,14 +72,12 @@ export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupPro
     const textToReplace = fullText || streamedText;
     if (textToReplace) {
       try {
-        // Hide popup first to remove always-on-top window that blocks app activation.
-        // Then paste_text activates the previous app by bundle ID (not Cmd+Tab),
-        // so macOS auto-focusing the wrong app is not an issue.
-        await invoke("hide_translation_popup");
+        // Run hide + paste in one backend command to avoid a race where the
+        // second invoke is dropped after hiding the WebView.
         const response = await invoke<{
           success: boolean;
           error?: { code: string; message: string };
-        }>("paste_text", { text: textToReplace });
+        }>("hide_and_paste_text", { text: textToReplace });
         if (!response.success && response.error) {
           console.error(
             "Paste failed:",
