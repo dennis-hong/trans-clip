@@ -77,7 +77,21 @@ git log <last-tag>..HEAD --oneline       # 변경사항 확인
 
 변경사항이 없으면 "릴리즈할 변경 사항이 없습니다"라고 알리고 중단합니다.
 
-### 2) 사전 준비 상태 점검
+### 2) 미커밋 변경사항 확인
+
+릴리즈 전에 스테이지되지 않은 변경사항이 있는지 반드시 확인합니다.
+
+```bash
+git status --short
+```
+
+미커밋 변경사항이 있으면:
+- 릴리즈에 포함해야 할 변경이면 먼저 커밋합니다.
+- 릴리즈와 무관한 변경이면 사용자에게 알리고 stash 또는 커밋 여부를 확인합니다.
+
+> **주의**: 버전 범프 커밋과 미커밋 코드 변경을 같은 커밋에 섞지 마세요. 코드 변경을 먼저 별도 커밋한 뒤, 버전 범프 커밋을 생성합니다.
+
+### 3) 사전 준비 상태 점검
 
 태그 푸시 전에 반드시 아래를 확인합니다.
 
@@ -85,13 +99,22 @@ git log <last-tag>..HEAD --oneline       # 변경사항 확인
 # 1. 서명 키 존재 확인
 ls ~/.tauri/transclip.key ~/.tauri/transclip.key.pub ~/.tauri/transclip.key.pass
 
-# 2. GitHub Secrets 설정 확인
-gh secret list  # TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD 존재 필수
+# 2. GitHub 활성 계정 확인 (중요!)
+gh auth status
+# 활성 계정이 'dennis-hong'이어야 합니다.
+# 다른 계정이 활성화되어 있으면 전환합니다:
+#   gh auth switch --user dennis-hong
 
-# 3. 공개키가 플레이스홀더가 아닌지 확인
+# 3. GitHub Secrets 설정 확인
+gh secret list  # TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD 존재 필수
+# 주의: gh secret list가 403 권한 오류를 반환하면 활성 계정이 잘못된 것입니다.
+# 계정을 전환한 뒤 다시 시도합니다.
+# 계정 전환 후에도 실패하면, 이전 릴리즈가 성공했다면 Secret은 설정되어 있는 것으로 간주해도 됩니다.
+
+# 4. 공개키가 플레이스홀더가 아닌지 확인
 grep '"pubkey"' src-tauri/tauri.conf.json  # REPLACE_WITH... 이면 안 됨
 
-# 4. 로컬 서명 테스트
+# 5. 로컬 서명 테스트
 printf "test" > /tmp/sign-test.txt
 PASS="$(<~/.tauri/transclip.key.pass)"
 pnpm tauri signer sign -f ~/.tauri/transclip.key -p "$PASS" /tmp/sign-test.txt
@@ -100,7 +123,7 @@ rm /tmp/sign-test.txt /tmp/sign-test.txt.sig
 
 하나라도 실패하면 "사전 준비" 섹션을 따라 설정 후 재시도합니다.
 
-### 3) 버전 결정
+### 4) 버전 결정
 
 `$ARGUMENTS` 규칙:
 - `patch`: 패치 버전 증가 (`0.1.12 -> 0.1.13`)
@@ -110,15 +133,17 @@ rm /tmp/sign-test.txt /tmp/sign-test.txt.sig
 
 입력이 없으면 `patch`를 사용합니다.
 
-### 4) 버전 파일 업데이트
+### 5) 버전 파일 업데이트
 
 다음 파일 버전을 동일하게 맞춥니다.
-- `package.json`
-- `src-tauri/Cargo.toml`
-- `src-tauri/tauri.conf.json`
-- `README.md` (배지 등 버전 표기가 있는 경우)
+- `package.json` — `"version": "X.X.X"`
+- `src-tauri/Cargo.toml` — `version = "X.X.X"`
+- `src-tauri/tauri.conf.json` — `"version": "X.X.X"`
+- `README.md` — `Version-X.X.X` (배지)
 
-### 5) 커밋/푸시
+> **참고**: `Cargo.toml`은 `=` 구문이고 나머지는 JSON `":"` 구문입니다. grep으로 확인할 때 두 형식 모두 체크하세요.
+
+### 6) 커밋/푸시
 
 ```bash
 git add -A
@@ -126,7 +151,7 @@ git commit -m "chore: bump version to X.X.X"
 git push origin main
 ```
 
-### 6) 릴리즈 태그 생성/푸시
+### 7) 릴리즈 태그 생성/푸시
 
 ```bash
 git tag "vX.X.X"
@@ -135,27 +160,36 @@ git push origin "vX.X.X"
 
 태그 푸시 시 GitHub Actions `release` 워크플로가 자동 실행됩니다.
 
-### 7) 워크플로 검증
+### 8) 워크플로 검증
 
-빌드는 약 **8분** 소요됩니다. 아래 순서로 폴링합니다.
+빌드는 약 **8~10분** 소요됩니다. 아래 순서로 폴링합니다.
 
 ```bash
 # 실행 ID 확인
 gh run list --workflow release --limit 1
+```
 
-# 초기 상태 확인 (검증 단계 통과 여부)
+```bash
+# 30초 후 초기 상태 확인 (검증 단계 통과 여부)
 sleep 30 && gh run view <run-id> --json jobs --jq '.jobs[0].steps[] | .name + " → " + .status + " " + .conclusion'
+```
 
-# 빌드 중 주기적 확인 (2~3분 간격)
-gh run view --job=<job-id>
+```bash
+# 빌드 단계가 in_progress이면 3분 간격으로 폴링
+# (실측: 빌드 5~7분 + 서명/패키징 1~2분)
+sleep 180 && gh run view <run-id> --json jobs --jq '.jobs[0].steps[] | .name + " → " + .status + " " + .conclusion'
+```
 
-# 완료 또는 실패 확인
-gh run view <run-id> --json status,conclusion
+```bash
+# 최종 완료 확인 (간단한 상태만)
+gh run view <run-id> --json status,conclusion --jq '"\(.status) \(.conclusion)"'
 ```
 
 > **주의**: `gh run watch`는 출력이 과도하고 장시간 대기합니다. 위 폴링 방식을 권장합니다.
 
-### 8) 릴리즈 자산 확인
+> **참고**: CI에 "Verify Developer ID code signing" 단계에서 경고(warning)가 나올 수 있습니다. 이는 Apple Developer ID 인증서 없이 빌드된 경우이며, 현재로서는 경고만 출력하고 릴리즈를 중단하지 않습니다. 장기적으로 Apple 서명/노타라이즈를 구성하면 업데이트 시 접근성·키체인 재요청 문제가 근본적으로 해결됩니다.
+
+### 9) 릴리즈 자산 확인
 
 ```bash
 gh release view "vX.X.X" --json url,assets
@@ -173,9 +207,22 @@ gh release view "vX.X.X" --json url,assets
 curl -sSfL "https://github.com/dennis-hong/trans-clip/releases/latest/download/latest.json"
 ```
 
-### 9) 릴리즈 노트 작성
+### 10) 릴리즈 노트 작성
 
 자동 생성된 릴리즈 노트를 아래 템플릿으로 교체합니다.
+
+먼저 변경 이력을 확인합니다:
+
+```bash
+git log <prev-tag>..vX.X.X --oneline --no-merges
+```
+
+`chore:` 커밋(버전 범프 등)은 릴리즈 노트에서 제외합니다.
+
+커밋 유형에 따라 아래 카테고리로 분류합니다:
+- `feat:` → "새로운 기능"
+- `fix:` → "버그 수정"
+- `refactor:`, `perf:`, 기능 개선 → "개선"
 
 ```bash
 gh release edit "vX.X.X" --notes "$(cat <<'NOTES'
@@ -185,6 +232,9 @@ gh release edit "vX.X.X" --notes "$(cat <<'NOTES'
 
 #### 새로운 기능
 * **기능 이름** — 설명
+
+#### 개선
+* **개선 내용** — 설명
 
 #### 버그 수정
 * **수정 내용** — 설명
@@ -229,9 +279,10 @@ NOTES
 )"
 ```
 
-`git log <prev-tag>..vX.X.X --oneline --no-merges`를 참고해 새로운 기능과 버그 수정을 정리합니다. `chore:` 커밋(버전 범프 등)은 릴리즈 노트에서 제외합니다.
+> **주의**: `gh release edit`가 HTTP 404를 반환하면 `gh auth status`로 활성 계정을 확인하세요.
+> 리포지토리 소유자 계정(`dennis-hong`)이 아닌 다른 계정이 활성화되어 있으면 `gh auth switch --user dennis-hong`으로 전환 후 재시도합니다.
 
-### 10) 완료 보고
+### 11) 완료 보고
 
 - 릴리즈 URL 전달
 - 업로드된 아티팩트 목록 전달
@@ -255,6 +306,8 @@ gh run view --log-failed --job=<job-id> 2>&1 | tail -30
 | `Updater public key is not configured` | pubkey 플레이스홀더 상태 | `tauri.conf.json` pubkey 업데이트 |
 | `incorrect updater private key password` | 비밀번호 불일치 | 키 재생성 후 Secret/pubkey 재동기화 |
 | `Wrong password for that key` | 빈 비밀번호로 키 생성 후 빈 문자열이 아닌 값이 Secret에 등록됨 | 키 재생성 (명시적 비밀번호 사용) |
+| `HTTP 404: Not Found` (gh release edit) | gh auth 활성 계정이 리포지토리 소유자가 아님 | `gh auth switch --user dennis-hong` |
+| `HTTP 403` (gh secret list) | gh auth 활성 계정 권한 부족 | `gh auth switch --user dennis-hong` |
 
 ### 실패 후 재릴리즈
 
