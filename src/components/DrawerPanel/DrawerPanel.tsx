@@ -59,9 +59,17 @@ interface DrawerPanelProps {
   isStealthMode?: boolean;
   onTranslate?: (text: string) => void;
   onPolish?: (text: string) => void;
+  openSettingsSignal?: number;
 }
 
-export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTranslate, onPolish }: DrawerPanelProps) {
+export function DrawerPanel({
+  hasAccessibility,
+  onClose,
+  isStealthMode,
+  onTranslate,
+  onPolish,
+  openSettingsSignal,
+}: DrawerPanelProps) {
   const [currentView, setCurrentView] = useState<DrawerView>("history");
   const [drawerMode, setDrawerMode] = useState<DrawerMode>("expanded");
   const [searchQuery, setSearchQuery] = useState("");
@@ -176,16 +184,6 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
       unlisten.then((fn) => fn());
     };
   }, [fetchHistory]);
-
-  // Listen for open_settings event from tray menu
-  useEffect(() => {
-    const unlisten = listen("open_settings", () => {
-      handleOpenSettings();
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, []);
 
   // Handler for creating new post-it (defined before keyboard shortcuts useEffect)
   const handleCreateNewItem = useCallback(async () => {
@@ -344,7 +342,7 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
     }
   };
 
-  const updateDrawerMode = async (mode: DrawerMode) => {
+  const updateDrawerMode = useCallback(async (mode: DrawerMode) => {
     setDrawerMode(mode);
     try {
       await invoke("set_drawer_mode", { mode });
@@ -363,7 +361,7 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
     } catch (err) {
       console.error("Failed to set drawer mode:", err);
     }
-  };
+  }, []);
 
   const handleSearch = useCallback(
     (query: string) => {
@@ -469,10 +467,10 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
     }
   };
 
-  const handleOpenSettings = async () => {
+  const handleOpenSettings = useCallback(async () => {
     setCurrentView("settings");
     await updateDrawerMode("full");
-  };
+  }, [updateDrawerMode]);
 
   const handleOpenGlossary = async () => {
     setCurrentView("glossary");
@@ -483,6 +481,15 @@ export function DrawerPanel({ hasAccessibility, onClose, isStealthMode, onTransl
     setCurrentView("history");
     await updateDrawerMode("expanded");
   };
+
+  // Open settings when requested by App-level menu events.
+  useEffect(() => {
+    if (!openSettingsSignal) {
+      return;
+    }
+
+    void handleOpenSettings();
+  }, [openSettingsSignal, handleOpenSettings]);
 
 
   // Horizontal scroll with mouse wheel

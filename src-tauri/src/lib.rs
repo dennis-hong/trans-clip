@@ -10,7 +10,7 @@ use database::Database;
 use std::sync::Arc;
 use tauri::{
     image::Image,
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, RunEvent, WindowEvent,
 };
@@ -18,6 +18,13 @@ use tokio::sync::Mutex;
 
 pub struct AppState {
     pub db: Arc<Mutex<Database>>,
+}
+
+fn show_main_window_and_emit(app: &tauri::AppHandle, event_name: &str) {
+    if let Some(window) = app.get_webview_window("main") {
+        hotkey::show_window_at_position(&window);
+        let _ = window.emit(event_name, ());
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -54,12 +61,56 @@ pub fn run() {
                 db: Arc::new(Mutex::new(db)),
             });
 
+            // macOS app menu (top menu bar) - add manual update action.
+            #[cfg(target_os = "macos")]
+            {
+                let app_menu = Menu::default(app.handle())?;
+                let app_submenu = app_menu
+                    .items()?
+                    .into_iter()
+                    .find_map(|item| item.as_submenu().cloned());
+
+                if let Some(app_submenu) = app_submenu {
+                    let separator_before = PredefinedMenuItem::separator(app)?;
+                    let check_updates_app_item = MenuItem::with_id(
+                        app,
+                        "check_updates_app",
+                        "Check for Updates...",
+                        true,
+                        None::<&str>,
+                    )?;
+                    let separator_after = PredefinedMenuItem::separator(app)?;
+
+                    app_submenu.insert_items(
+                        &[&separator_before, &check_updates_app_item, &separator_after],
+                        1,
+                    )?;
+                }
+
+                app.set_menu(app_menu)?;
+                app.on_menu_event(|app, event| {
+                    if event.id().as_ref() == "check_updates_app" {
+                        show_main_window_and_emit(app, "check_for_updates");
+                    }
+                });
+            }
+
             // Create tray menu
             let quit_item = MenuItem::with_id(app, "quit", "Quit TransClip", true, None::<&str>)?;
             let show_item = MenuItem::with_id(app, "show", "Show History", true, None::<&str>)?;
             let settings_item = MenuItem::with_id(app, "settings", "Settings...", true, None::<&str>)?;
+            let check_updates_item = MenuItem::with_id(
+                app,
+                "check_updates_tray",
+                "Check for Updates...",
+                true,
+                None::<&str>,
+            )?;
             let feedback_item = MenuItem::with_id(app, "feedback", "Report Bug / Feedback", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_item, &settings_item, &feedback_item, &quit_item])?;
+            let menu = Menu::with_items(
+                app,
+                &[&show_item, &settings_item, &check_updates_item, &feedback_item, &quit_item],
+            )?;
 
             // Load tray icon from file
             let icon = app
@@ -83,18 +134,13 @@ pub fn run() {
                         app.exit(0);
                     }
                     "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            hotkey::show_window_at_position(&window);
-                            // Emit event to open history view
-                            let _ = window.emit("show_history", ());
-                        }
+                        show_main_window_and_emit(app, "show_history");
                     }
                     "settings" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            hotkey::show_window_at_position(&window);
-                            // Emit event to open settings view
-                            let _ = window.emit("open_settings", ());
-                        }
+                        show_main_window_and_emit(app, "open_settings");
+                    }
+                    "check_updates_tray" => {
+                        show_main_window_and_emit(app, "check_for_updates");
                     }
                     "feedback" => {
                         // Open GitHub issues page in default browser

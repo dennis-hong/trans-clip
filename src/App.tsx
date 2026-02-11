@@ -17,6 +17,7 @@ function App() {
   const [hasAccessibility, setHasAccessibility] = useState<boolean | null>(null);
   const [openedFromHistory, setOpenedFromHistory] = useState(false);
   const [showRestartDialog, setShowRestartDialog] = useState(false);
+  const [openSettingsSignal, setOpenSettingsSignal] = useState(0);
   const prevAccessibilityRef = useRef<boolean | null>(null);
   const checkForUpdate = useUpdateStore((state) => state.checkForUpdate);
 
@@ -69,6 +70,13 @@ function App() {
     } catch (err) {
       console.error("Failed to restart app:", err);
     }
+  }, []);
+
+  const openSettingsFromMenu = useCallback(() => {
+    setSourceText(null);
+    setOpenedFromHistory(false);
+    setPopupMode("history");
+    setOpenSettingsSignal((prev) => prev + 1);
   }, []);
 
   // Position window at bottom on mount
@@ -137,6 +145,29 @@ function App() {
       unlisten.then((fn) => fn());
     };
   }, []);
+
+  // Listen for open_settings events from menu
+  useEffect(() => {
+    const unlisten = listen("open_settings", () => {
+      openSettingsFromMenu();
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [openSettingsFromMenu]);
+
+  // Listen for manual update check events from menu
+  useEffect(() => {
+    const unlisten = listen("check_for_updates", () => {
+      openSettingsFromMenu();
+      void checkForUpdate(true).catch((err) => {
+        console.error("Failed to check updates from menu:", err);
+      });
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [checkForUpdate, openSettingsFromMenu]);
 
   // Adjust window size when popup mode changes
   useEffect(() => {
@@ -277,6 +308,7 @@ function App() {
           isStealthMode={true}
           onTranslate={handleTranslateFromHistory}
           onPolish={handlePolishFromHistory}
+          openSettingsSignal={openSettingsSignal}
         />
       </div>
     );
@@ -292,6 +324,7 @@ function App() {
         isStealthMode={true}
         onTranslate={handleTranslateFromHistory}
         onPolish={handlePolishFromHistory}
+        openSettingsSignal={openSettingsSignal}
       />
     </div>
   );
