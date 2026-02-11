@@ -2,7 +2,7 @@
 
 클립보드의 텍스트를 Claude AI를 사용해 자동으로 번역해주는 macOS 앱입니다.
 
-![TransClip Screenshot](https://img.shields.io/badge/Platform-macOS-blue) ![Version](https://img.shields.io/badge/Version-0.1.13-green) ![License](https://img.shields.io/badge/License-MIT-yellow)
+![TransClip Screenshot](https://img.shields.io/badge/Platform-macOS-blue) ![Version](https://img.shields.io/badge/Version-0.1.14-green) ![License](https://img.shields.io/badge/License-MIT-yellow)
 
 ## ✨ 주요 기능
 

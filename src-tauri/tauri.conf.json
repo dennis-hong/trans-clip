@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "TransClip",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "identifier": "com.transclip.app",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -65,7 +65,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc2NzA3RDVENzEwODFDMTgKUldRWUhBaHhYWDF3ZGhWY2FiaFFncDUrS29za0lqdFFUQTM3bGpqTWxYU2ZUdG5QM0JJbUFiRG4K",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQyMTMyRjZBQjM1MEUyMDkKUldRSjRsQ3phaThUMG02WmJHVXgxZjRnb2UzTjdIekFJTGJ1dlBqWnBMU25DdllkbmZIcWJkQzgK",
       "endpoints": [
         "https://github.com/dennis-hong/trans-clip/releases/latest/download/latest.json"
       ]
