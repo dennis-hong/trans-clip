@@ -35,6 +35,9 @@ export function SettingsPanel() {
     try {
       const status = await invoke<PermissionStatus>("check_accessibility_permission");
       setAccessibilityGranted(status.granted);
+      if (status.granted) {
+        await invoke<boolean>("start_hotkey_monitor");
+      }
     } catch (err) {
       console.error("Failed to check accessibility:", err);
     }

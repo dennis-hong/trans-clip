@@ -58,6 +58,27 @@ jobs:
       - name: Build signed updater artifacts
         run: pnpm tauri build --target aarch64-apple-darwin
 
+      - name: Verify Developer ID code signing
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APP_DIR="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/TransClip.app"
+          if [ ! -d "${APP_DIR}" ]; then
+            echo "Missing app bundle: ${APP_DIR}"
+            exit 1
+          fi
+
+          SIGN_INFO="$(codesign -dv --verbose=4 "${APP_DIR}" 2>&1 || true)"
+          echo "${SIGN_INFO}"
+
+          if ! printf "%s" "${SIGN_INFO}" | grep -q "Authority=Developer ID Application"; then
+            echo "Release build is not signed with a Developer ID Application certificate."
+            echo "Unsigned/ad-hoc updates can trigger repeated Accessibility and Keychain prompts."
+            echo "Configure Apple code signing in CI before creating releases."
+            exit 1
+          fi
+
       - name: Prepare release assets
         id: prep
         shell: bash

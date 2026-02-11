@@ -165,22 +165,39 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Initialize popup position from settings and migrate API key to Keychain
-            {
+            // Initialize popup position from settings and migrate legacy API key only when needed.
+            // Also load hotkey interval from settings for startup.
+            let startup_hotkey_interval_ms = {
                 let state = app.state::<AppState>();
                 tauri::async_runtime::block_on(async {
                     let db = state.db.lock().await;
+                    let mut interval_ms = 500_u64;
+
                     if let Ok(settings) = db.get_settings().await {
                         hotkey::set_popup_position(&settings.popup_position);
+                        if settings.double_press_interval > 0 {
+                            interval_ms = settings.double_press_interval as u64;
+                        }
                     }
-                    // Migrate API key from SQLite to Keychain (backward compat)
-                    keychain::migrate_api_key_from_db(&db).await;
-                });
-            }
+
+                    // Only touch Keychain if a legacy SQLite key still exists.
+                    match db.get_api_key().await {
+                        Ok(Some(key)) if !key.is_empty() => {
+                            keychain::migrate_api_key_from_db(&db).await;
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            log::warn!("Failed to check legacy API key before migration: {}", e);
+                        }
+                    }
+
+                    interval_ms
+                })
+            };
 
             // Initialize and start hotkey monitoring (Cmd+C+C detection)
             let hotkey_handle = app_handle.clone();
-            let hotkey_manager = hotkey::HotkeyManager::new(hotkey_handle, 500);
+            let hotkey_manager = hotkey::HotkeyManager::new(hotkey_handle, startup_hotkey_interval_ms);
 
             // Check accessibility permission before starting
             if hotkey::check_accessibility_permission() {
@@ -245,6 +262,7 @@ pub fn run() {
             // System commands
             commands::system::check_accessibility_permission,
             commands::system::request_accessibility_permission,
+            commands::system::start_hotkey_monitor,
             commands::system::open_accessibility_settings,
             commands::system::show_translation_popup,
             commands::system::hide_translation_popup,

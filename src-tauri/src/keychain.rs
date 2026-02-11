@@ -80,6 +80,17 @@ pub fn delete_api_key_from_keychain() -> Result<(), String> {
 /// Migrate API key from SQLite to Keychain (for backward compatibility)
 /// Returns true if migration occurred
 pub async fn migrate_api_key_from_db(db: &crate::database::Database) -> bool {
+    // Important: check legacy SQLite value first.
+    // If no legacy key exists, skip touching Keychain to avoid unnecessary auth prompts on startup.
+    let legacy_key = match db.get_api_key().await {
+        Ok(Some(key)) if !key.is_empty() => key,
+        Ok(_) => return false,
+        Err(e) => {
+            log::warn!("Failed to read API key from SQLite during migration: {}", e);
+            return false;
+        }
+    };
+
     // Check if key exists in Keychain already
     match get_api_key_from_keychain() {
         Ok(Some(_)) => return false, // Already in Keychain, no migration needed
@@ -90,28 +101,18 @@ pub async fn migrate_api_key_from_db(db: &crate::database::Database) -> bool {
         }
     }
 
-    // Check if key exists in SQLite (old storage)
-    match db.get_api_key().await {
-        Ok(Some(key)) => {
-            // Migrate to Keychain
-            match store_api_key(&key) {
-                Ok(()) => {
-                    // Clear from SQLite after successful migration
-                    if let Err(e) = db.delete_api_key().await {
-                        log::warn!("Failed to clear API key from SQLite after migration: {}", e);
-                    }
-                    log::info!("API key migrated from SQLite to Keychain");
-                    true
-                }
-                Err(e) => {
-                    log::warn!("Failed to migrate API key to Keychain: {}", e);
-                    false
-                }
+    // Migrate to Keychain
+    match store_api_key(&legacy_key) {
+        Ok(()) => {
+            // Clear from SQLite after successful migration
+            if let Err(e) = db.delete_api_key().await {
+                log::warn!("Failed to clear API key from SQLite after migration: {}", e);
             }
+            log::info!("API key migrated from SQLite to Keychain");
+            true
         }
-        Ok(None) => false,
         Err(e) => {
-            log::warn!("Failed to read API key from SQLite during migration: {}", e);
+            log::warn!("Failed to migrate API key to Keychain: {}", e);
             false
         }
     }
