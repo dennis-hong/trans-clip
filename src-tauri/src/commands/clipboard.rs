@@ -51,57 +51,12 @@ pub fn save_frontmost_app() {
     }
 }
 
-/// Activate a previously saved app by its bundle identifier.
-/// Returns true if the app was successfully activated.
+/// Get the saved bundle identifier of the previous frontmost app.
 #[cfg(target_os = "macos")]
-fn activate_previous_app() -> bool {
-    let bundle_id = {
-        match PREVIOUS_APP_BUNDLE_ID.lock() {
-            Ok(guard) => guard.clone(),
-            Err(_) => None,
-        }
-    };
-
-    let Some(bundle_id) = bundle_id else {
-        log::warn!("activate_previous_app: no saved app bundle ID, falling back to Cmd+Tab");
-        return false;
-    };
-
-    log::info!("activate_previous_app: activating '{}'", bundle_id);
-
-    use objc::{msg_send, sel, sel_impl, class};
-    use objc::runtime::Object;
-    use cocoa::foundation::NSString;
-    use cocoa::base::nil;
-
-    unsafe {
-        let workspace: *mut Object = msg_send![class!(NSWorkspace), sharedWorkspace];
-
-        // Create NSString from bundle ID
-        let ns_bundle_id = NSString::alloc(nil).init_str(&bundle_id);
-
-        // Get running applications
-        let running_apps: *mut Object = msg_send![workspace, runningApplications];
-        let count: usize = msg_send![running_apps, count];
-
-        for i in 0..count {
-            let app: *mut Object = msg_send![running_apps, objectAtIndex: i];
-            let app_bundle: *mut Object = msg_send![app, bundleIdentifier];
-            if app_bundle.is_null() {
-                continue;
-            }
-
-            let is_equal: objc::runtime::BOOL = msg_send![app_bundle, isEqualToString: ns_bundle_id];
-            if is_equal != objc::runtime::NO {
-                // NSApplicationActivateAllWindows | NSApplicationActivateIgnoringOtherApps
-                let _activated: objc::runtime::BOOL = msg_send![app, activateWithOptions: 3usize];
-                log::info!("activate_previous_app: activated '{}'", bundle_id);
-                return true;
-            }
-        }
-
-        log::warn!("activate_previous_app: app '{}' not found in running apps", bundle_id);
-        false
+fn get_previous_app_bundle_id() -> Option<String> {
+    match PREVIOUS_APP_BUNDLE_ID.lock() {
+        Ok(guard) => guard.clone(),
+        Err(_) => None,
     }
 }
 
@@ -350,65 +305,30 @@ pub async fn paste_text(state: State<'_, AppState>, text: String) -> Result<Past
     // Wait for clipboard to be fully committed
     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
-    // Then activate previous app and paste
+    // Activate previous app and paste in a SINGLE AppleScript execution.
+    // Combining activate + delay + Cmd+V in one script ensures proper sequencing
+    // (separating them into Rust activate + osascript Cmd+V caused timing issues).
     #[cfg(target_os = "macos")]
     {
         use std::process::Command;
 
-        // Try to activate the previously saved app directly
-        let activated = activate_previous_app();
+        let bundle_id = get_previous_app_bundle_id();
 
-        if activated {
-            log::info!("paste_text: Activated previous app directly by bundle ID");
-
-            // Wait for app activation to complete
-            tokio::time::sleep(tokio::time::Duration::from_millis(paste_delay_ms as u64)).await;
-
-            // Send Cmd+V
-            let script = r#"
+        let script = if let Some(ref bid) = bundle_id {
+            log::info!("paste_text: Using bundle ID '{}' for activation", bid);
+            format!(
+                r#"
+                tell application id "{}" to activate
+                delay {:.3}
                 tell application "System Events"
                     key code 9 using command down
                 end tell
-            "#;
-
-            let result = Command::new("osascript").arg("-e").arg(script).output();
-
-            match result {
-                Ok(output) => {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    if output.status.success() {
-                        log::info!("paste_text: Success (direct activate)!");
-                        Ok(PasteResponse {
-                            success: true,
-                            error: None,
-                        })
-                    } else {
-                        log::error!("paste_text: Cmd+V failed: {}", stderr);
-                        Ok(PasteResponse {
-                            success: false,
-                            error: Some(ErrorDetail {
-                                code: "PASTE_FAILED".to_string(),
-                                message: format!("Failed to send Cmd+V: {}", stderr),
-                            }),
-                        })
-                    }
-                }
-                Err(e) => {
-                    log::error!("paste_text: Failed to execute osascript: {}", e);
-                    Ok(PasteResponse {
-                        success: false,
-                        error: Some(ErrorDetail {
-                            code: "PASTE_FAILED".to_string(),
-                            message: format!("Failed to execute paste: {}", e),
-                        }),
-                    })
-                }
-            }
+            "#,
+                bid, delay_seconds
+            )
         } else {
-            // Fallback: use Cmd+Tab (old behavior)
-            log::warn!("paste_text: Falling back to Cmd+Tab");
-
-            let script = format!(
+            log::warn!("paste_text: No saved bundle ID, falling back to Cmd+Tab");
+            format!(
                 r#"
                 tell application "System Events"
                     key code 48 using command down
@@ -417,55 +337,40 @@ pub async fn paste_text(state: State<'_, AppState>, text: String) -> Result<Past
                 end tell
             "#,
                 delay_seconds
-            );
+            )
+        };
 
-            let result = Command::new("osascript").arg("-e").arg(&script).output();
+        let result = Command::new("osascript").arg("-e").arg(&script).output();
 
-            match result {
-                Ok(output) => {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    log::info!("paste_text: AppleScript exit status: {}", output.status);
-                    if !stdout.is_empty() {
-                        log::info!("paste_text: stdout: {}", stdout);
-                    }
-                    if !stderr.is_empty() {
-                        log::warn!("paste_text: stderr: {}", stderr);
-                    }
-
-                    if output.status.success() {
-                        log::info!("paste_text: Success (Cmd+Tab fallback)!");
-                        Ok(PasteResponse {
-                            success: true,
-                            error: None,
-                        })
-                    } else {
-                        log::error!(
-                            "paste_text: AppleScript failed with status {}",
-                            output.status
-                        );
-                        Ok(PasteResponse {
-                            success: false,
-                            error: Some(ErrorDetail {
-                                code: "ACCESSIBILITY_DENIED".to_string(),
-                                message: format!(
-                                    "Accessibility permission required for paste. stderr: {}",
-                                    stderr
-                                ),
-                            }),
-                        })
-                    }
-                }
-                Err(e) => {
-                    log::error!("paste_text: Failed to execute osascript: {}", e);
+        match result {
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if output.status.success() {
+                    log::info!("paste_text: Success!");
+                    Ok(PasteResponse {
+                        success: true,
+                        error: None,
+                    })
+                } else {
+                    log::error!("paste_text: AppleScript failed: {}", stderr);
                     Ok(PasteResponse {
                         success: false,
                         error: Some(ErrorDetail {
                             code: "PASTE_FAILED".to_string(),
-                            message: format!("Failed to execute paste: {}", e),
+                            message: format!("AppleScript failed: {}", stderr),
                         }),
                     })
                 }
+            }
+            Err(e) => {
+                log::error!("paste_text: Failed to execute osascript: {}", e);
+                Ok(PasteResponse {
+                    success: false,
+                    error: Some(ErrorDetail {
+                        code: "PASTE_FAILED".to_string(),
+                        message: format!("Failed to execute paste: {}", e),
+                    }),
+                })
             }
         }
     }
