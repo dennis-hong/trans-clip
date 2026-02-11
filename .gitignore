@@ -53,3 +53,5 @@ coverage/
 *.db
 *.sqlite
 *.sqlite3
+
+.claude/

@@ -58,11 +58,11 @@ export function TranslationPopup({
     const textToReplace = fullText || streamedText;
     if (textToReplace) {
       try {
-        // Activate previous app and paste BEFORE hiding the popup.
-        // If we hide first, macOS auto-focuses another app, causing focus race conditions.
-        const response = await invoke<{ success: boolean; error?: { code: string; message: string } }>("paste_text", { text: textToReplace });
-        // Hide the popup after paste is done
+        // Hide popup first to remove always-on-top window that blocks app activation.
+        // Then paste_text activates the previous app by bundle ID (not Cmd+Tab),
+        // so macOS auto-focusing the wrong app is not an issue.
         await invoke("hide_translation_popup");
+        const response = await invoke<{ success: boolean; error?: { code: string; message: string } }>("paste_text", { text: textToReplace });
         if (!response.success && response.error) {
           console.error("Paste failed:", response.error.code, response.error.message);
         }
