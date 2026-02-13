@@ -56,6 +56,12 @@ pnpm tauri dev
 pnpm tauri build
 ```
 
+원클릭 검증(권장):
+
+```bash
+pnpm smoke:macos
+```
+
 체크 항목:
 
 1. 앱 시작 후 접근성 권한 상태 표시/재시작 동작

@@ -164,6 +164,7 @@ pnpm tauri build
 pnpm ci:check
 pnpm test:rust
 pnpm lint:rust
+pnpm smoke:macos
 ```
 
 자세한 macOS 전용 테스트 전략(Unit → Integration → 수동 스모크)은 `docs/testing-strategy.md`를 참고하세요.
