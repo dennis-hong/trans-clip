@@ -1,5 +1,3 @@
-use log;
-
 const KEYCHAIN_SERVICE: &str = "com.transclip.app";
 const KEYCHAIN_ACCOUNT: &str = "api_key";
 

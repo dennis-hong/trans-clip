@@ -1,3 +1,5 @@
+#![allow(unexpected_cfgs, deprecated)]
+
 use crate::AppState;
 use tauri::{Manager, State};
 
