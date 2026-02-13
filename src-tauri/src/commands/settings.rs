@@ -33,7 +33,9 @@ pub async fn update_settings(
         current.auto_detect_language = if v { 1 } else { 0 };
     }
     if let Some(v) = settings.double_press_interval {
-        current.double_press_interval = v.clamp(200, 1000);
+        let interval = v.clamp(200, 1000);
+        current.double_press_interval = interval;
+        crate::hotkey::set_double_press_interval(interval as u64);
     }
     if let Some(v) = settings.translation_cache_days {
         current.translation_cache_days = v.clamp(1, 30);

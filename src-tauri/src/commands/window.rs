@@ -10,6 +10,10 @@ use super::types::{CurrentMonitorInfo, MonitorInfo, SnapEdge, SnapResult, Window
 // Store the last valid monitor index to preserve position across hide/show cycles
 static LAST_MONITOR_INDEX: AtomicUsize = AtomicUsize::new(0);
 
+pub fn get_last_monitor_index() -> usize {
+    LAST_MONITOR_INDEX.load(Ordering::SeqCst)
+}
+
 /// Update LAST_MONITOR_INDEX based on current mouse cursor position
 /// This is called before showing the window to ensure it appears on the correct monitor
 pub fn update_monitor_from_cursor(app: &tauri::AppHandle) {

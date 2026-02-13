@@ -68,6 +68,7 @@ export function usePolishStream(): UsePolishStreamReturn {
               setStreamedText(accumulatedTextRef.current);
               break;
             case "completed":
+            {
               // Use accumulated text as fallback if fullText is undefined
               const finalText = event.data.fullText ?? accumulatedTextRef.current;
               setFullText(finalText);
@@ -75,6 +76,7 @@ export function usePolishStream(): UsePolishStreamReturn {
               setTokenUsage(event.data.tokenUsage);
               setIsStreaming(false);
               break;
+            }
             case "error":
               setError(event.data.message);
               setStreamedText("");

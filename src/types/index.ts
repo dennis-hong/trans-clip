@@ -355,7 +355,11 @@ export type PolishStreamEvent =
  * 클립보드 변경 이벤트 페이로드
  */
 export interface ClipboardChangedPayload {
-  item: ClipboardItem;
+  id: string;
+  content: string;
+  contentPreview: string;
+  copiedAt: string;
+  sourceApp?: string;
 }
 
 /**

@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { normalizeSourceLanguage } from "@/utils/languageArgs";
 import type { TranslateResponse, Language } from "@/types";
 
 interface UseTranslationOptions {
@@ -30,10 +31,7 @@ export function useTranslation(
       try {
         const response = await invoke<TranslateResponse>("translate", {
           text,
-          sourceLanguage:
-            options.sourceLanguage === "auto"
-              ? undefined
-              : options.sourceLanguage,
+          sourceLanguage: normalizeSourceLanguage(options.sourceLanguage),
           targetLanguage: options.targetLanguage,
           model,
         });

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { normalizeSourceLanguage } from "@/utils/languageArgs";
 import type {
   TranslateResponse,
   Language,
@@ -22,10 +23,7 @@ export const claudeApi = {
   ): Promise<TranslateResponse> {
     return invoke<TranslateResponse>("translate", {
       text,
-      sourceLanguage:
-        options?.sourceLanguage === "auto"
-          ? undefined
-          : options?.sourceLanguage,
+      sourceLanguage: normalizeSourceLanguage(options?.sourceLanguage),
       targetLanguage: options?.targetLanguage,
     });
   },

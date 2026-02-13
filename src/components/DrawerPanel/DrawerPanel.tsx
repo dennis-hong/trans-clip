@@ -185,6 +185,17 @@ export function DrawerPanel({
     };
   }, [fetchHistory]);
 
+  // Listen for open_settings event from tray menu
+  useEffect(() => {
+    const unlisten = listen("open_settings", () => {
+      handleOpenSettings();
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+    // Intentional one-time subscription for tray event listener.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Handler for creating new post-it (defined before keyboard shortcuts useEffect)
   const handleCreateNewItem = useCallback(async () => {
     try {
@@ -387,11 +398,20 @@ export function DrawerPanel({
 
   const handlePaste = useCallback(async (item: ClipboardItem) => {
     try {
-      await invoke("paste_text", { text: item.content });
-      setToast({ message: "붙여넣기 완료!", type: "success" });
-      // In stealth mode, close after pasting
-      if (isStealthMode && onClose) {
-        setTimeout(() => onClose(), 100);
+      const response = await invoke<{ success: boolean; error?: { message?: string } }>("paste_text", {
+        text: item.content,
+      });
+      if (response.success) {
+        setToast({ message: "붙여넣기 완료!", type: "success" });
+        // In stealth mode, close after pasting
+        if (isStealthMode && onClose) {
+          setTimeout(() => onClose(), 100);
+        }
+      } else {
+        setToast({
+          message: response.error?.message ?? "붙여넣기 실패",
+          type: "error",
+        });
       }
     } catch (err) {
       console.error("Failed to paste:", err);

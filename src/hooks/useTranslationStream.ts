@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { invokeWithTimeout } from "@/utils/invokeWithTimeout";
+import { normalizeSourceLanguage } from "@/utils/languageArgs";
 import type { TranslateStreamEvent, Language, TranslateResponse } from "@/types";
 
 interface UseTranslationStreamOptions {
@@ -37,10 +38,6 @@ export function useTranslationStream(
   const accumulatedTextRef = useRef("");
   // Ref to prevent concurrent translate calls
   const isTranslatingRef = useRef(false);
-  // Refs to detect when channel events are actually received
-  const receivedAnyEventRef = useRef(false);
-  const receivedFinalEventRef = useRef(false);
-
   const translate = useCallback(
     async (text: string, model?: string): Promise<void> => {
       // Prevent concurrent calls
@@ -48,8 +45,6 @@ export function useTranslationStream(
         return;
       }
       isTranslatingRef.current = true;
-      receivedAnyEventRef.current = false;
-      receivedFinalEventRef.current = false;
 
       setError(null);
 
@@ -57,10 +52,7 @@ export function useTranslationStream(
         // Fast path: if cached, bypass streaming channel entirely.
         const cached = await invokeWithTimeout<TranslateResponse | null>("get_cached_translation", {
           text,
-          sourceLanguage:
-            options.sourceLanguage === "auto"
-              ? undefined
-              : options.sourceLanguage,
+          sourceLanguage: normalizeSourceLanguage(options.sourceLanguage),
           targetLanguage: options.targetLanguage,
           model,
         });
@@ -98,7 +90,6 @@ export function useTranslationStream(
         const channel = new Channel<TranslateStreamEvent>();
 
         channel.onmessage = (event: TranslateStreamEvent) => {
-          receivedAnyEventRef.current = true;
           switch (event.event) {
             case "started":
               setDetectedLanguage(event.data.detectedLanguage);
@@ -110,7 +101,7 @@ export function useTranslationStream(
               setStreamedText(accumulatedTextRef.current);
               break;
             case "completed":
-              receivedFinalEventRef.current = true;
+            {
               // Use accumulated text as fallback if fullText is undefined
               const finalText = event.data.fullText ?? accumulatedTextRef.current;
               setFullText(finalText);
@@ -118,8 +109,8 @@ export function useTranslationStream(
               setTokenUsage(event.data.tokenUsage);
               setIsStreaming(false);
               break;
+            }
             case "error":
-              receivedFinalEventRef.current = true;
               setError(event.data.message);
               setStreamedText("");
               setFullText("");
@@ -130,10 +121,7 @@ export function useTranslationStream(
 
         await invokeWithTimeout("translate_stream", {
           text,
-          sourceLanguage:
-            options.sourceLanguage === "auto"
-              ? undefined
-              : options.sourceLanguage,
+          sourceLanguage: normalizeSourceLanguage(options.sourceLanguage),
           targetLanguage: options.targetLanguage,
           model,
           onEvent: channel,

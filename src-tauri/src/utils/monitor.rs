@@ -50,3 +50,22 @@ pub fn get_logical_bounds(monitor: &Monitor) -> MonitorLogicalBounds {
         width: (size.width as f64 / scale) as i32,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{calculate_adaptive_width, generate_monitor_key};
+
+    #[test]
+    fn calculate_adaptive_width_respects_breakpoints_and_clamps() {
+        assert_eq!(calculate_adaptive_width(1440), 1152);
+        assert_eq!(calculate_adaptive_width(1920), 1344);
+        assert_eq!(calculate_adaptive_width(3000), 1600);
+        assert_eq!(calculate_adaptive_width(700), 800);
+    }
+
+    #[test]
+    fn generate_monitor_key_is_stable() {
+        let key = generate_monitor_key(3024, 1964, 2.0);
+        assert_eq!(key, "3024x1964@2.00");
+    }
+}

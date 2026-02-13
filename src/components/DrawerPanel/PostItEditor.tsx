@@ -22,6 +22,13 @@ export function PostItEditor({
     textareaRef.current?.focus();
   }, []);
 
+  const handleSave = useCallback(() => {
+    const trimmedContent = content.trim();
+    if (trimmedContent) {
+      onSave(trimmedContent);
+    }
+  }, [content, onSave]);
+
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -42,14 +49,7 @@ export function PostItEditor({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [content, onClose]);
-
-  const handleSave = useCallback(() => {
-    const trimmedContent = content.trim();
-    if (trimmedContent) {
-      onSave(trimmedContent);
-    }
-  }, [content, onSave]);
+  }, [handleSave, onClose]);
 
   const characterCount = content.length;
   const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;

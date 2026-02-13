@@ -81,6 +81,9 @@ pub async fn polish(
     let user_prompt =
         prompts::polish::build_user_prompt(&text, &context, &channel, &options, &detected_lang);
 
+    // Release DB lock before external API call to avoid blocking unrelated DB operations.
+    drop(db);
+
     // Call Claude API
     let client = reqwest::Client::new();
     let response = client

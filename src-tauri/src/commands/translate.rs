@@ -236,6 +236,9 @@ pub async fn translate(
         .send()
         .await;
 
+    // Release DB lock before handling network response/body parsing.
+    drop(db);
+
     match response {
         Ok(res) => {
             if res.status().is_success() {
@@ -266,6 +269,7 @@ pub async fn translate(
                     output_tokens,
                 };
 
+                let db = state.db.lock().await;
                 let _ = db.insert_translation(&translation).await;
 
                 // Update glossary usage counts
@@ -632,5 +636,28 @@ pub fn detect_language(text: &str) -> String {
         "ko".to_string()
     } else {
         "en".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::detect_language;
+
+    #[test]
+    fn detects_korean_when_ratio_is_high_enough() {
+        let result = detect_language("안녕하세요 hello");
+        assert_eq!(result, "ko");
+    }
+
+    #[test]
+    fn detects_english_when_ratio_is_low() {
+        let result = detect_language("hello world 123");
+        assert_eq!(result, "en");
+    }
+
+    #[test]
+    fn defaults_to_english_when_no_alphabetic_chars() {
+        let result = detect_language("12345 !@#$%");
+        assert_eq!(result, "en");
     }
 }

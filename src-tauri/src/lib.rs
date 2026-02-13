@@ -176,7 +176,7 @@ pub fn run() {
                     if let Ok(settings) = db.get_settings().await {
                         hotkey::set_popup_position(&settings.popup_position);
                         if settings.double_press_interval > 0 {
-                            interval_ms = settings.double_press_interval as u64;
+                            interval_ms = (settings.double_press_interval as u64).clamp(200, 1000);
                         }
                     }
 

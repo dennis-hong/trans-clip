@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useClipboardStore } from "@/store";
+import type { PasteResponse } from "@/types";
 
 export function useClipboard() {
   const store = useClipboardStore();
@@ -17,8 +18,8 @@ export function useClipboard() {
 
   const pasteText = useCallback(async (text: string) => {
     try {
-      await invoke("paste_text", { text });
-      return true;
+      const response = await invoke<PasteResponse>("paste_text", { text });
+      return response.success;
     } catch (err) {
       console.error("Failed to paste:", err);
       return false;

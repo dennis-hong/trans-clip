@@ -16,6 +16,12 @@ pub fn set_popup_position(_position: &str) {
     log::info!("set_popup_position called but ignored - position is always bottom center");
 }
 
+pub fn set_double_press_interval(interval_ms: u64) {
+    let clamped = interval_ms.clamp(200, 1000);
+    DOUBLE_PRESS_INTERVAL_MS.store(clamped, Ordering::SeqCst);
+    log::info!("Updated hotkey double press interval to {}ms", clamped);
+}
+
 /// Show the window and set focus
 /// Before showing, update the monitor index based on cursor position and
 /// set the window position to bottom-center of the target monitor.
@@ -29,7 +35,13 @@ pub fn show_window_at_position(window: &tauri::WebviewWindow) {
     // Calculate and set position before showing
     if let Ok(monitors) = window.app_handle().available_monitors() {
         let sorted = sort_monitors_by_position(monitors.iter());
-        if let Some(monitor) = sorted.first() {
+        let monitor_index = crate::commands::window::get_last_monitor_index();
+        let monitor = sorted
+            .get(monitor_index)
+            .copied()
+            .or_else(|| sorted.first().copied());
+
+        if let Some(monitor) = monitor {
             let mon_pos = monitor.position();
             let mon_size = monitor.size();
             let scale = monitor.scale_factor();

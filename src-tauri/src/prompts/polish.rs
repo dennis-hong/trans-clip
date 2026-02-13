@@ -368,3 +368,41 @@ Output only the polished result."#,
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{build_options_section, build_user_prompt};
+
+    #[test]
+    fn options_section_is_empty_when_no_options() {
+        let section = build_options_section(&[], "ko");
+        assert_eq!(section, "");
+    }
+
+    #[test]
+    fn options_section_contains_selected_option_text() {
+        let options = vec!["shorter".to_string(), "formal".to_string()];
+        let section = build_options_section(&options, "en");
+
+        assert!(section.contains("Additional Requests"));
+        assert!(section.contains("Make it shorter"));
+        assert!(section.contains("More formal"));
+    }
+
+    #[test]
+    fn build_user_prompt_contains_context_channel_and_text() {
+        let options = vec!["action-clear".to_string()];
+        let prompt = build_user_prompt(
+            "Please review this update.",
+            "peer-discussion",
+            "slack-message",
+            &options,
+            "en",
+        );
+
+        assert!(prompt.contains("## Context"));
+        assert!(prompt.contains("## Channel"));
+        assert!(prompt.contains("## Original Text"));
+        assert!(prompt.contains("Please review this update."));
+    }
+}

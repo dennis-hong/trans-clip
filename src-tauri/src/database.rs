@@ -224,9 +224,17 @@ impl Database {
             .await?
         };
 
-        let total: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM clipboard_items")
-            .fetch_one(&self.pool)
-            .await?;
+        let total: (i64,) = if let Some(query) = search_query {
+            let search_pattern = format!("%{}%", query);
+            sqlx::query_as("SELECT COUNT(*) FROM clipboard_items WHERE content LIKE ?")
+                .bind(&search_pattern)
+                .fetch_one(&self.pool)
+                .await?
+        } else {
+            sqlx::query_as("SELECT COUNT(*) FROM clipboard_items")
+                .fetch_one(&self.pool)
+                .await?
+        };
 
         Ok((items, total.0))
     }
@@ -885,4 +893,77 @@ pub struct UserSettingsRow {
     pub paste_delay_ms: i32,
     pub api_key: Option<String>,
     pub updated_at: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ClipboardItemRow, Database};
+    use chrono::Utc;
+
+    fn test_db_path() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("transclip-test-{}.db", uuid::Uuid::new_v4()))
+    }
+
+    #[tokio::test]
+    async fn cleanup_old_clipboard_items_preserves_pinned_items() {
+        let path = test_db_path();
+        let db = Database::new(&path).await.expect("db should initialize");
+
+        let pinned = ClipboardItemRow {
+            id: "pinned".to_string(),
+            content: "pinned".to_string(),
+            content_preview: "pinned".to_string(),
+            copied_at: Utc::now().to_rfc3339(),
+            source_app: None,
+            is_pinned: 1,
+            character_count: Some(6),
+            word_count: Some(1),
+            updated_at: None,
+        };
+        db.insert_clipboard_item(&pinned)
+            .await
+            .expect("should insert pinned item");
+
+        for idx in 0..5 {
+            let content = format!("unpinned-{idx}");
+            let item = ClipboardItemRow {
+                id: format!("unpinned-{idx}"),
+                content: content.clone(),
+                content_preview: content,
+                copied_at: Utc::now().to_rfc3339(),
+                source_app: None,
+                is_pinned: 0,
+                character_count: Some(10),
+                word_count: Some(1),
+                updated_at: None,
+            };
+            db.insert_clipboard_item(&item)
+                .await
+                .expect("should insert unpinned item");
+        }
+
+        db.cleanup_old_clipboard_items(3)
+            .await
+            .expect("cleanup should succeed");
+
+        let (items, total) = db
+            .get_clipboard_history(50, 0, None)
+            .await
+            .expect("should fetch history");
+
+        assert_eq!(total, 3);
+        assert_eq!(items.len(), 3);
+        assert!(items.iter().any(|item| item.id == "pinned" && item.is_pinned == 1));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn validate_api_key_format_requires_expected_prefix_and_length() {
+        assert!(Database::validate_api_key_format(
+            "sk-ant-this-is-a-valid-looking-key"
+        ));
+        assert!(!Database::validate_api_key_format("sk-test-short"));
+        assert!(!Database::validate_api_key_format("invalid-prefix-value"));
+    }
 }
