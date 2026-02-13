@@ -32,6 +32,11 @@ Tauri v2 공식 문서 기준으로 **Desktop WebDriver는 macOS 미지원**입�
 - 지원: Windows, Linux
 - 미지원: macOS (WKWebView용 WebDriver 클라이언트 부재)
 
+참고 문서(확인일: 2026-02-13):
+
+- https://v2.tauri.app/develop/tests/
+- https://v2.tauri.app/develop/tests/webdriver/
+
 따라서 macOS-only 프로젝트에서는 아래 방식으로 운영합니다.
 
 - 자동화: Unit + Integration을 CI에서 강제
