@@ -14,7 +14,24 @@ pnpm test:rust
 pnpm lint:rust
 
 echo "[smoke:macos] Building Tauri macOS bundle..."
-pnpm tauri build
+if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
+  pnpm tauri build
+else
+  echo "[smoke:macos] TAURI_SIGNING_PRIVATE_KEY not set; disabling updater artifacts for local smoke run."
+  TMP_TAURI_CONFIG="$(mktemp "${TMPDIR:-/tmp}/tauri-smoke-config-XXXXXX.json")"
+  trap 'rm -f "${TMP_TAURI_CONFIG}"' EXIT
+
+  node -e '
+    const fs = require("fs");
+    const out = process.argv[1];
+    const conf = JSON.parse(fs.readFileSync("src-tauri/tauri.conf.json", "utf8"));
+    conf.bundle = conf.bundle || {};
+    conf.bundle.createUpdaterArtifacts = false;
+    fs.writeFileSync(out, JSON.stringify(conf, null, 2));
+  ' "${TMP_TAURI_CONFIG}"
+
+  pnpm tauri build --config "${TMP_TAURI_CONFIG}"
+fi
 
 shopt -s nullglob
 DMG_FILES=(src-tauri/target/release/bundle/dmg/*.dmg)
