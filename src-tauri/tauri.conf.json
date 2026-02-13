@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "TransClip",
   "version": "0.1.17",
-  "identifier": "com.transclip.app",
+  "identifier": "com.transclip",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",

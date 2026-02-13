@@ -1,3 +1,4 @@
+// Keep legacy service name to preserve previously stored API keys.
 const KEYCHAIN_SERVICE: &str = "com.transclip.app";
 const KEYCHAIN_ACCOUNT: &str = "api_key";
 
