@@ -156,6 +156,18 @@ pnpm tauri build
 - [Rust](https://www.rust-lang.org/)
 - [Tauri CLI](https://tauri.app/)
 
+## 🧪 테스트 & CI
+
+로컬 기본 검증:
+
+```bash
+pnpm ci:check
+pnpm test:rust
+pnpm lint:rust
+```
+
+자세한 macOS 전용 테스트 전략(Unit → Integration → 수동 스모크)은 `docs/testing-strategy.md`를 참고하세요.
+
 ## 📄 라이선스
 
 MIT License
