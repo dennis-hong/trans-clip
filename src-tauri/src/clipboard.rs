@@ -26,6 +26,7 @@ pub struct ClipboardChangedPayload {
 pub struct ClipboardMonitor {
     app_handle: AppHandle,
     running: Arc<AtomicBool>,
+    last_change_count: Arc<Mutex<i64>>,
     last_content_hash: Arc<Mutex<u64>>,
 }
 
@@ -34,6 +35,7 @@ impl ClipboardMonitor {
         Self {
             app_handle,
             running: Arc::new(AtomicBool::new(false)),
+            last_change_count: Arc::new(Mutex::new(-1)),
             last_content_hash: Arc::new(Mutex::new(0)),
         }
     }
@@ -49,11 +51,12 @@ impl ClipboardMonitor {
 
         let app_handle = self.app_handle.clone();
         let running = self.running.clone();
+        let last_change_count = self.last_change_count.clone();
         let last_content_hash = self.last_content_hash.clone();
 
         // Spawn monitoring task
         tauri::async_runtime::spawn(async move {
-            Self::monitor_loop(app_handle, running, last_content_hash).await;
+            Self::monitor_loop(app_handle, running, last_change_count, last_content_hash).await;
         });
 
         Ok(())
@@ -69,6 +72,7 @@ impl ClipboardMonitor {
     async fn monitor_loop(
         app_handle: AppHandle,
         running: Arc<AtomicBool>,
+        last_change_count: Arc<Mutex<i64>>,
         last_content_hash: Arc<Mutex<u64>>,
     ) {
         log::info!("Clipboard monitor loop started");
@@ -78,7 +82,7 @@ impl ClipboardMonitor {
 
         while running.load(Ordering::SeqCst) {
             // Check for clipboard changes
-            match Self::check_clipboard_change(&last_content_hash).await {
+            match Self::check_clipboard_change(&last_change_count, &last_content_hash).await {
                 Ok(Some(text)) => {
                     // Clipboard changed with new text
                     if let Err(e) = Self::handle_clipboard_change(&app_handle, text).await {
@@ -101,11 +105,30 @@ impl ClipboardMonitor {
 
     /// Check if clipboard has changed and return the new text if so
     async fn check_clipboard_change(
+        last_change_count: &Arc<Mutex<i64>>,
         last_content_hash: &Arc<Mutex<u64>>,
     ) -> Result<Option<String>, String> {
         #[cfg(target_os = "macos")]
         {
+            use objc::runtime::Object;
+            use objc::{class, msg_send, sel, sel_impl};
             use std::process::Command;
+
+            let change_count = unsafe {
+                let pasteboard: *mut Object = msg_send![class!(NSPasteboard), generalPasteboard];
+                if pasteboard.is_null() {
+                    return Err("Failed to access NSPasteboard".to_string());
+                }
+                let count: i64 = msg_send![pasteboard, changeCount];
+                count
+            };
+
+            let mut last_count = last_change_count.lock().await;
+            if *last_count == change_count {
+                return Ok(None);
+            }
+            *last_count = change_count;
+            drop(last_count);
 
             // Read clipboard text with explicit UTF-8 environment.
             let content_output = Command::new("pbpaste")
@@ -136,18 +159,15 @@ impl ClipboardMonitor {
             let content_hash = Self::hash_string(&text);
 
             let mut last_hash = last_content_hash.lock().await;
-
             if *last_hash != content_hash {
                 *last_hash = content_hash;
-                return Ok(Some(text));
             }
-
-            Ok(None)
+            Ok(Some(text))
         }
 
         #[cfg(not(target_os = "macos"))]
         {
-            let _ = last_content_hash;
+            let _ = (last_change_count, last_content_hash);
             Err("Clipboard monitoring only supported on macOS".to_string())
         }
     }

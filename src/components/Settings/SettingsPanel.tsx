@@ -31,12 +31,14 @@ export function SettingsPanel() {
 
   const [accessibilityGranted, setAccessibilityGranted] = useState<boolean | null>(null);
 
-  const checkAccessibilityStatus = async () => {
+  const checkAccessibilityStatus = async (): Promise<boolean> => {
     try {
       const status = await invoke<PermissionStatus>("check_accessibility_permission");
       setAccessibilityGranted(status.granted);
+      return status.granted;
     } catch (err) {
       console.error("Failed to check accessibility:", err);
+      return false;
     }
   };
 
@@ -70,7 +72,19 @@ export function SettingsPanel() {
   const handleRequestAccessibility = async () => {
     try {
       await invoke("request_accessibility_permission");
-      setTimeout(checkAccessibilityStatus, 1000);
+      setTimeout(() => {
+        void (async () => {
+          const granted = await checkAccessibilityStatus();
+          if (!granted) {
+            return;
+          }
+          try {
+            await invoke<boolean>("start_hotkey_monitor");
+          } catch (err) {
+            console.error("Failed to start hotkey monitor after permission grant:", err);
+          }
+        })();
+      }, 1000);
     } catch (err) {
       console.error("Failed to request accessibility:", err);
     }

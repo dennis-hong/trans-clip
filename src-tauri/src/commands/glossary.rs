@@ -19,6 +19,12 @@ struct GlossaryJsonEnvelope {
     entries: Vec<GlossaryFileEntry>,
 }
 
+#[derive(Debug)]
+enum ImportRow {
+    Entry(GlossaryFileEntry),
+    ParseError(String),
+}
+
 fn is_keyword_unique_violation(err: &sqlx::Error) -> bool {
     match err {
         sqlx::Error::Database(db_err) => db_err
@@ -155,7 +161,7 @@ pub async fn import_glossary(
     overwrite: bool,
 ) -> Result<ImportGlossaryResponse, String> {
     let format = format.to_lowercase();
-    let mut rows: Vec<(i32, GlossaryFileEntry)> = Vec::new();
+    let mut rows: Vec<(i32, ImportRow)> = Vec::new();
 
     match format.as_str() {
         "csv" => {
@@ -166,15 +172,9 @@ pub async fn import_glossary(
 
             for (idx, record) in reader.deserialize::<GlossaryFileEntry>().enumerate() {
                 match record {
-                    Ok(entry) => rows.push((idx as i32 + 2, entry)),
+                    Ok(entry) => rows.push((idx as i32 + 2, ImportRow::Entry(entry))),
                     Err(err) => {
-                        rows.push((
-                            idx as i32 + 2,
-                            GlossaryFileEntry {
-                                keyword: String::new(),
-                                description: format!("__CSV_PARSE_ERROR__: {}", err),
-                            },
-                        ));
+                        rows.push((idx as i32 + 2, ImportRow::ParseError(err.to_string())));
                     }
                 }
             }
@@ -191,7 +191,7 @@ pub async fn import_glossary(
                 .map_err(|e| format!("Failed to parse JSON: {}", e))?;
 
             for (idx, entry) in parsed_entries.into_iter().enumerate() {
-                rows.push((idx as i32 + 1, entry));
+                rows.push((idx as i32 + 1, ImportRow::Entry(entry)));
             }
         }
         _ => {
@@ -205,13 +205,13 @@ pub async fn import_glossary(
     let mut errors: Vec<ImportError> = Vec::new();
 
     for (line, row) in rows {
-        if let Some(message) = row.description.strip_prefix("__CSV_PARSE_ERROR__: ") {
-            errors.push(ImportError {
-                line,
-                message: message.to_string(),
-            });
-            continue;
-        }
+        let row = match row {
+            ImportRow::Entry(entry) => entry,
+            ImportRow::ParseError(message) => {
+                errors.push(ImportError { line, message });
+                continue;
+            }
+        };
 
         let keyword = row.keyword.trim().to_string();
         let description = row.description.trim().to_string();

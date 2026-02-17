@@ -73,7 +73,8 @@ function App() {
   useEffect(() => {
     const positionWindow = async () => {
       try {
-        await invoke("move_to_monitor", { monitorIndex: 0, anchor: "bottom" });
+        const monitorIndex = await invoke<number>("get_current_monitor_index");
+        await invoke("move_to_monitor", { monitorIndex, anchor: "bottom" });
       } catch (err) {
         console.error("Failed to position window:", err);
       }

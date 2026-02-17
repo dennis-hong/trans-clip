@@ -48,7 +48,6 @@ pub async fn update_settings(
         current.popup_position = v.clone();
     }
     if let Some(v) = settings.launch_at_login {
-        current.launch_at_login = if v { 1 } else { 0 };
         #[cfg(desktop)]
         {
             use tauri_plugin_autostart::ManagerExt;
@@ -61,9 +60,14 @@ pub async fn update_settings(
             };
 
             if let Err(err) = result {
-                log::warn!("Failed to apply launch-at-login setting: {}", err);
+                return Err(format!(
+                    "Failed to apply launch-at-login setting: {}",
+                    err
+                ));
             }
         }
+
+        current.launch_at_login = if v { 1 } else { 0 };
     }
     if let Some(v) = settings.paste_delay_ms {
         current.paste_delay_ms = v.clamp(50, 500);
