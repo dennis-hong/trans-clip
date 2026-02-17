@@ -134,7 +134,7 @@ pub fn resolve_api_key(settings_api_key: &Option<String>) -> Option<String> {
 
 /// Validate the API key by making a test request to the Claude API
 pub async fn validate_api_key(api_key: &str) -> Result<bool, String> {
-    let client = reqwest::Client::new();
+    let client = crate::utils::streaming::anthropic_http_client();
 
     let response = client
         .post("https://api.anthropic.com/v1/messages")

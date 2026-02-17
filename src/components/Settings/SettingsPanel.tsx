@@ -35,9 +35,6 @@ export function SettingsPanel() {
     try {
       const status = await invoke<PermissionStatus>("check_accessibility_permission");
       setAccessibilityGranted(status.granted);
-      if (status.granted) {
-        await invoke<boolean>("start_hotkey_monitor");
-      }
     } catch (err) {
       console.error("Failed to check accessibility:", err);
     }
@@ -60,10 +57,6 @@ export function SettingsPanel() {
 
   const handleDoublePressIntervalChange = (value: number) => {
     updateSettings({ doublePressInterval: value });
-  };
-
-  const handleAutoDetectChange = (enabled: boolean) => {
-    updateSettings({ autoDetectLanguage: enabled });
   };
 
   const handleLaunchAtLoginChange = (enabled: boolean) => {
@@ -147,18 +140,9 @@ export function SettingsPanel() {
             </select>
           </div>
 
-          {/* Auto Detect Language */}
-          <div className="flex items-center justify-between mt-3">
-            <label className="text-xs font-medium text-blue-700">
-              언어 자동 감지
-            </label>
-            <ToggleSwitch
-              enabled={settings.autoDetectLanguage}
-              onChange={handleAutoDetectChange}
-              disabled={isLoading}
-              color="blue"
-            />
-          </div>
+          <p className="mt-3 text-[10px] text-blue-600">
+            언어 방향은 입력 텍스트를 기준으로 자동 결정됩니다.
+          </p>
         </SettingsCard>
 
         {/* 단축키 카드 - 녹색 */}
@@ -345,8 +329,8 @@ export function SettingsPanel() {
               type="button"
               className="flex items-center gap-1 text-gray-500 hover:text-blue-600 transition-colors"
               onClick={() => {
-                import("@tauri-apps/plugin-shell").then(({ open }) => {
-                  open("https://github.com/dennis-hong/trans-clip/issues");
+                void invoke("open_feedback_page").catch((err) => {
+                  console.error("Failed to open feedback page:", err);
                 });
               }}
             >

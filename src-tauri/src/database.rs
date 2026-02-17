@@ -47,16 +47,14 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_clipboard_content ON clipboard_items(content)",
-        )
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_clipboard_content ON clipboard_items(content)")
+            .execute(&self.pool)
+            .await?;
 
         // Check if glossary_entries table exists with old schema and migrate if needed
         // This must happen BEFORE creating the new table or indexes
         let table_exists: Option<(String,)> = sqlx::query_as(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='glossary_entries'"
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='glossary_entries'",
         )
         .fetch_optional(&self.pool)
         .await?;
@@ -84,11 +82,9 @@ impl Database {
         .await?;
 
         // Create index for glossary_entries keyword search
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_glossary_keyword ON glossary_entries(keyword)",
-        )
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_glossary_keyword ON glossary_entries(keyword)")
+            .execute(&self.pool)
+            .await?;
 
         // Create translations table (cache)
         sqlx::query(
@@ -145,9 +141,11 @@ impl Database {
             .await;
 
         // Migration: add paste_delay_ms column if it doesn't exist
-        let _ = sqlx::query("ALTER TABLE user_settings ADD COLUMN paste_delay_ms INTEGER NOT NULL DEFAULT 150")
-            .execute(&self.pool)
-            .await;
+        let _ = sqlx::query(
+            "ALTER TABLE user_settings ADD COLUMN paste_delay_ms INTEGER NOT NULL DEFAULT 150",
+        )
+        .execute(&self.pool)
+        .await;
 
         // Migration: add updated_at column to clipboard_items if it doesn't exist
         let _ = sqlx::query("ALTER TABLE clipboard_items ADD COLUMN updated_at DATETIME")
@@ -300,11 +298,10 @@ impl Database {
 
     pub async fn cleanup_old_clipboard_items(&self, max_count: i32) -> Result<(), sqlx::Error> {
         // Get the count of pinned items (these are always preserved)
-        let pinned_count: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 1"
-        )
-        .fetch_one(&self.pool)
-        .await?;
+        let pinned_count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 1")
+                .fetch_one(&self.pool)
+                .await?;
 
         // Calculate how many non-pinned items we can keep
         // Total slots = max_count, pinned items take priority
@@ -380,9 +377,9 @@ impl Database {
         .await?;
 
         // Return the created item
-        self.get_clipboard_item_by_id(id).await?.ok_or_else(|| {
-            sqlx::Error::RowNotFound
-        })
+        self.get_clipboard_item_by_id(id)
+            .await?
+            .ok_or_else(|| sqlx::Error::RowNotFound)
     }
 
     /// Update the content of an existing clipboard item
@@ -417,7 +414,10 @@ impl Database {
     }
 
     /// Get a single clipboard item by ID
-    pub async fn get_clipboard_item_by_id(&self, id: &str) -> Result<Option<ClipboardItemRow>, sqlx::Error> {
+    pub async fn get_clipboard_item_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<ClipboardItemRow>, sqlx::Error> {
         sqlx::query_as::<_, ClipboardItemRow>(
             r#"
             SELECT id, content, content_preview, copied_at, source_app, is_pinned, character_count, word_count, updated_at
@@ -438,7 +438,7 @@ impl Database {
     async fn migrate_glossary_schema(&self) -> Result<(), sqlx::Error> {
         // Check if old columns exist
         let has_old_schema: Option<(String,)> = sqlx::query_as(
-            "SELECT name FROM pragma_table_info('glossary_entries') WHERE name = 'source_text'"
+            "SELECT name FROM pragma_table_info('glossary_entries') WHERE name = 'source_text'",
         )
         .fetch_optional(&self.pool)
         .await?;
@@ -555,10 +555,7 @@ impl Database {
         Ok(entries)
     }
 
-    pub async fn insert_glossary_entry(
-        &self,
-        entry: &GlossaryEntryRow,
-    ) -> Result<(), sqlx::Error> {
+    pub async fn insert_glossary_entry(&self, entry: &GlossaryEntryRow) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
             INSERT INTO glossary_entries (id, keyword, description, created_at, updated_at, usage_count)
@@ -571,6 +568,34 @@ impl Database {
         .bind(&entry.created_at)
         .bind(&entry.updated_at)
         .bind(entry.usage_count)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn upsert_glossary_entry(
+        &self,
+        keyword: &str,
+        description: &str,
+    ) -> Result<(), sqlx::Error> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let id = uuid::Uuid::new_v4().to_string();
+
+        sqlx::query(
+            r#"
+            INSERT INTO glossary_entries (id, keyword, description, created_at, updated_at, usage_count)
+            VALUES (?, ?, ?, ?, ?, 0)
+            ON CONFLICT(keyword) DO UPDATE SET
+                description = excluded.description,
+                updated_at = CURRENT_TIMESTAMP
+            "#,
+        )
+        .bind(&id)
+        .bind(keyword)
+        .bind(description)
+        .bind(&now)
+        .bind(&now)
         .execute(&self.pool)
         .await?;
 
@@ -679,7 +704,10 @@ impl Database {
         .await
     }
 
-    pub async fn insert_translation(&self, translation: &TranslationRow) -> Result<(), sqlx::Error> {
+    pub async fn insert_translation(
+        &self,
+        translation: &TranslationRow,
+    ) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
             INSERT INTO translations (id, source_text, translated_text, source_language, target_language, model, created_at, glossary_used, input_tokens, output_tokens)
@@ -767,12 +795,11 @@ impl Database {
     // ============================================
 
     pub async fn get_api_key(&self) -> Result<Option<String>, sqlx::Error> {
-        let row: (Option<String>,) = sqlx::query_as(
-            "SELECT api_key FROM user_settings WHERE id = 'default'"
-        )
-        .fetch_one(&self.pool)
-        .await?;
-        
+        let row: (Option<String>,) =
+            sqlx::query_as("SELECT api_key FROM user_settings WHERE id = 'default'")
+                .fetch_one(&self.pool)
+                .await?;
+
         Ok(row.0)
     }
 
@@ -807,19 +834,25 @@ impl Database {
     // ============================================
 
     /// Get saved window width for a specific monitor
-    pub async fn get_monitor_window_width(&self, monitor_key: &str) -> Result<Option<i32>, sqlx::Error> {
-        let row: Option<(i32,)> = sqlx::query_as(
-            "SELECT window_width FROM monitor_window_sizes WHERE monitor_key = ?"
-        )
-        .bind(monitor_key)
-        .fetch_optional(&self.pool)
-        .await?;
-        
+    pub async fn get_monitor_window_width(
+        &self,
+        monitor_key: &str,
+    ) -> Result<Option<i32>, sqlx::Error> {
+        let row: Option<(i32,)> =
+            sqlx::query_as("SELECT window_width FROM monitor_window_sizes WHERE monitor_key = ?")
+                .bind(monitor_key)
+                .fetch_optional(&self.pool)
+                .await?;
+
         Ok(row.map(|(width,)| width))
     }
 
     /// Save window width for a specific monitor
-    pub async fn save_monitor_window_width(&self, monitor_key: &str, width: i32) -> Result<(), sqlx::Error> {
+    pub async fn save_monitor_window_width(
+        &self,
+        monitor_key: &str,
+        width: i32,
+    ) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
             INSERT INTO monitor_window_sizes (monitor_key, window_width, updated_at)
@@ -953,7 +986,9 @@ mod tests {
 
         assert_eq!(total, 3);
         assert_eq!(items.len(), 3);
-        assert!(items.iter().any(|item| item.id == "pinned" && item.is_pinned == 1));
+        assert!(items
+            .iter()
+            .any(|item| item.id == "pinned" && item.is_pinned == 1));
 
         let _ = std::fs::remove_file(path);
     }

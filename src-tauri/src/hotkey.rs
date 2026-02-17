@@ -10,12 +10,6 @@ static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 
 const DEFAULT_DOUBLE_PRESS_INTERVAL_MS: u64 = 500;
 
-/// Set the popup position from settings (deprecated - position is now always bottom center)
-pub fn set_popup_position(_position: &str) {
-    // No-op: popup position is now always bottom center, managed by set_drawer_mode
-    log::info!("set_popup_position called but ignored - position is always bottom center");
-}
-
 pub fn set_double_press_interval(interval_ms: u64) {
     let clamped = interval_ms.clamp(200, 1000);
     DOUBLE_PRESS_INTERVAL_MS.store(clamped, Ordering::SeqCst);
@@ -67,7 +61,10 @@ pub fn show_window_at_position(window: &tauri::WebviewWindow) {
 
             log::info!(
                 "Window positioned at ({}, {}), size {}x{} before showing",
-                x, y, win_width, win_height
+                x,
+                y,
+                win_width,
+                win_height
             );
         }
     }
@@ -130,9 +127,9 @@ mod macos {
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
         fn CGEventTapCreate(
-            tap: u32,            // CGEventTapLocation
-            place: u32,          // CGEventTapPlacement
-            options: u32,        // CGEventTapOptions
+            tap: u32,     // CGEventTapLocation
+            place: u32,   // CGEventTapPlacement
+            options: u32, // CGEventTapOptions
             events_of_interest: u64,
             callback: CGEventTapCallBack,
             user_info: *mut c_void,
@@ -145,11 +142,7 @@ mod macos {
             port: *mut c_void,
             order: i64,
         ) -> *mut c_void;
-        fn CFRunLoopAddSource(
-            run_loop: *mut c_void,
-            source: *mut c_void,
-            mode: *const c_void,
-        );
+        fn CFRunLoopAddSource(run_loop: *mut c_void, source: *mut c_void, mode: *const c_void);
         fn CFRunLoopGetCurrent() -> *mut c_void;
         fn CFRunLoopRun();
         fn CGEventTapEnable(tap: *mut c_void, enable: bool);
@@ -225,14 +218,14 @@ mod macos {
                 thread::spawn(|| {
                     trigger_show_history();
                 });
-                
+
                 return event;
             }
 
             // Cmd+C detected - check for double-press for Translation
             if is_cmd_pressed && !is_shift_pressed && is_c_key {
                 let last_time = LAST_CMD_C_TIME.swap(now, Ordering::SeqCst);
-                
+
                 // Reset D timer to prevent cross-triggering
                 LAST_CMD_D_TIME.store(0, Ordering::SeqCst);
 
@@ -255,7 +248,7 @@ mod macos {
             // Cmd+D detected - check for double-press for Polish
             if is_cmd_pressed && !is_shift_pressed && is_d_key {
                 let last_time = LAST_CMD_D_TIME.swap(now, Ordering::SeqCst);
-                
+
                 // Reset C timer to prevent cross-triggering
                 LAST_CMD_C_TIME.store(0, Ordering::SeqCst);
 
@@ -294,7 +287,9 @@ mod macos {
             );
 
             if tap.is_null() {
-                log::error!("Failed to create CGEventTap. Accessibility permission may be required.");
+                log::error!(
+                    "Failed to create CGEventTap. Accessibility permission may be required."
+                );
                 return;
             }
 
@@ -394,10 +389,10 @@ mod macos {
                 log::error!("Failed to simulate copy: {}", e);
                 return;
             }
-            
+
             // Wait for clipboard to update (need more time for AppleScript + clipboard sync)
             thread::sleep(std::time::Duration::from_millis(200));
-            
+
             // Get clipboard text
             match get_clipboard_text() {
                 Ok(text) if !text.trim().is_empty() => {
@@ -426,24 +421,24 @@ mod macos {
             }
         }
     }
-    
+
     /// Simulate Cmd+C to copy selected text to clipboard
     fn simulate_copy() -> Result<(), String> {
         use std::process::Command;
-        
+
         // Use key code 8 (c key) with command down - more reliable than keystroke
         let script = r#"
             tell application "System Events"
                 key code 8 using command down
             end tell
         "#;
-        
+
         let output = Command::new("osascript")
             .arg("-e")
             .arg(script)
             .output()
             .map_err(|e| format!("Failed to execute osascript: {}", e))?;
-        
+
         if output.status.success() {
             log::info!("Simulated Cmd+C (key code 8) successfully");
             Ok(())
@@ -452,7 +447,6 @@ mod macos {
             Err(format!("osascript failed: {}", stderr))
         }
     }
-
 }
 
 #[cfg(target_os = "macos")]
@@ -504,7 +498,6 @@ impl HotkeyManager {
         log::warn!("Hotkey monitoring is only supported on macOS");
         Ok(())
     }
-
 }
 
 // ============================================

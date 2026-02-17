@@ -1,5 +1,5 @@
 //! Clipboard monitoring module for macOS
-//! 
+//!
 //! This module monitors the system clipboard for changes and saves
 //! copied text to the clipboard history database.
 
@@ -26,7 +26,6 @@ pub struct ClipboardChangedPayload {
 pub struct ClipboardMonitor {
     app_handle: AppHandle,
     running: Arc<AtomicBool>,
-    last_change_count: Arc<Mutex<i64>>,
     last_content_hash: Arc<Mutex<u64>>,
 }
 
@@ -35,7 +34,6 @@ impl ClipboardMonitor {
         Self {
             app_handle,
             running: Arc::new(AtomicBool::new(false)),
-            last_change_count: Arc::new(Mutex::new(-1)),
             last_content_hash: Arc::new(Mutex::new(0)),
         }
     }
@@ -51,12 +49,11 @@ impl ClipboardMonitor {
 
         let app_handle = self.app_handle.clone();
         let running = self.running.clone();
-        let last_change_count = self.last_change_count.clone();
         let last_content_hash = self.last_content_hash.clone();
 
         // Spawn monitoring task
         tauri::async_runtime::spawn(async move {
-            Self::monitor_loop(app_handle, running, last_change_count, last_content_hash).await;
+            Self::monitor_loop(app_handle, running, last_content_hash).await;
         });
 
         Ok(())
@@ -72,17 +69,16 @@ impl ClipboardMonitor {
     async fn monitor_loop(
         app_handle: AppHandle,
         running: Arc<AtomicBool>,
-        last_change_count: Arc<Mutex<i64>>,
         last_content_hash: Arc<Mutex<u64>>,
     ) {
         log::info!("Clipboard monitor loop started");
 
-        // Poll interval - 500ms is a good balance between responsiveness and CPU usage
-        let poll_interval = Duration::from_millis(500);
+        // Poll interval tuned for lower CPU impact while keeping UX responsive.
+        let poll_interval = Duration::from_millis(700);
 
         while running.load(Ordering::SeqCst) {
             // Check for clipboard changes
-            match Self::check_clipboard_change(&last_change_count, &last_content_hash).await {
+            match Self::check_clipboard_change(&last_content_hash).await {
                 Ok(Some(text)) => {
                     // Clipboard changed with new text
                     if let Err(e) = Self::handle_clipboard_change(&app_handle, text).await {
@@ -105,23 +101,13 @@ impl ClipboardMonitor {
 
     /// Check if clipboard has changed and return the new text if so
     async fn check_clipboard_change(
-        last_change_count: &Arc<Mutex<i64>>,
         last_content_hash: &Arc<Mutex<u64>>,
     ) -> Result<Option<String>, String> {
         #[cfg(target_os = "macos")]
         {
             use std::process::Command;
 
-            // Get current clipboard change count using AppleScript
-            let change_count_output = Command::new("osascript")
-                .env("LANG", "en_US.UTF-8")
-                .env("LC_ALL", "en_US.UTF-8")
-                .arg("-e")
-                .arg("tell application \"System Events\" to return (the clipboard info)")
-                .output()
-                .map_err(|e| format!("Failed to get clipboard info: {}", e))?;
-
-            // Use pbpaste to get clipboard content with explicit UTF-8 encoding
+            // Read clipboard text with explicit UTF-8 environment.
             let content_output = Command::new("pbpaste")
                 .env("LANG", "en_US.UTF-8")
                 .env("LC_ALL", "en_US.UTF-8")
@@ -140,7 +126,7 @@ impl ClipboardMonitor {
                     String::from_utf8_lossy(&content_output.stdout).to_string()
                 }
             };
-            
+
             // Skip empty content
             if text.trim().is_empty() {
                 return Ok(None);
@@ -148,19 +134,11 @@ impl ClipboardMonitor {
 
             // Calculate hash of content to detect changes
             let content_hash = Self::hash_string(&text);
-            
+
             let mut last_hash = last_content_hash.lock().await;
-            
+
             if *last_hash != content_hash {
                 *last_hash = content_hash;
-                
-                // Also update change count from clipboard info
-                let mut last_count = last_change_count.lock().await;
-                let info_str = String::from_utf8_lossy(&change_count_output.stdout);
-                if let Some(count) = Self::parse_change_count(&info_str) {
-                    *last_count = count;
-                }
-                
                 return Ok(Some(text));
             }
 
@@ -169,7 +147,7 @@ impl ClipboardMonitor {
 
         #[cfg(not(target_os = "macos"))]
         {
-            let _ = (last_change_count, last_content_hash);
+            let _ = last_content_hash;
             Err("Clipboard monitoring only supported on macOS".to_string())
         }
     }
@@ -183,13 +161,6 @@ impl ClipboardMonitor {
         hasher.finish()
     }
 
-    /// Parse change count from clipboard info (best effort)
-    fn parse_change_count(info: &str) -> Option<i64> {
-        // The format varies, so we just use a simple incrementing counter
-        // based on content hash changes instead
-        Some(info.len() as i64)
-    }
-
     /// Handle a clipboard change event
     async fn handle_clipboard_change(app_handle: &AppHandle, text: String) -> Result<(), String> {
         log::info!("Clipboard changed: {} chars", text.len());
@@ -199,27 +170,28 @@ impl ClipboardMonitor {
             .try_state::<AppState>()
             .ok_or("Failed to get app state")?;
 
-        let db = state.db.lock().await;
+        let source_app = Self::get_frontmost_app();
+        let db = &state.db;
 
         // Get current settings for max history count
         let settings = db.get_settings().await.map_err(|e| e.to_string())?;
 
         // Check if this content already exists
-        let existing = Self::find_existing_item(&db, &text).await?;
+        let existing = Self::find_existing_item(db, &text).await?;
 
         let item = if let Some(existing_id) = existing {
             // Update existing item's timestamp
             db.update_clipboard_item_timestamp(&existing_id)
                 .await
                 .map_err(|e| e.to_string())?;
-            
+
             // Return the updated item info
             ClipboardChangedPayload {
                 id: existing_id,
                 content: text.clone(),
                 content_preview: Self::create_preview(&text),
                 copied_at: chrono::Utc::now().to_rfc3339(),
-                source_app: Self::get_frontmost_app(),
+                source_app: source_app.clone(),
             }
         } else {
             // Create new clipboard item
@@ -228,8 +200,6 @@ impl ClipboardMonitor {
             let preview = Self::create_preview(&text);
             let char_count = text.chars().count() as i32;
             let word_count = text.split_whitespace().count() as i32;
-            let source_app = Self::get_frontmost_app();
-
             let item_row = ClipboardItemRow {
                 id: id.clone(),
                 content: text.clone(),
@@ -284,7 +254,7 @@ impl ClipboardMonitor {
             .take(100)
             .map(|c| if c.is_whitespace() { ' ' } else { c })
             .collect();
-        
+
         if text.chars().count() > 100 {
             format!("{}...", preview.trim())
         } else {

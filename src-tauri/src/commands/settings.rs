@@ -9,17 +9,18 @@ use super::types::{
 
 #[tauri::command]
 pub async fn get_settings(state: State<'_, AppState>) -> Result<UserSettingsResponse, String> {
-    let db = state.db.lock().await;
+    let db = &state.db;
     let settings = db.get_settings().await.map_err(|e| e.to_string())?;
     Ok(UserSettingsResponse::from(settings))
 }
 
 #[tauri::command]
 pub async fn update_settings(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     settings: UpdateSettingsRequest,
 ) -> Result<UserSettingsResponse, String> {
-    let db = state.db.lock().await;
+    let db = &state.db;
     let mut current = db.get_settings().await.map_err(|e| e.to_string())?;
 
     // Apply updates
@@ -45,11 +46,24 @@ pub async fn update_settings(
     }
     if let Some(v) = settings.popup_position {
         current.popup_position = v.clone();
-        // Update the static popup position
-        crate::hotkey::set_popup_position(&v);
     }
     if let Some(v) = settings.launch_at_login {
         current.launch_at_login = if v { 1 } else { 0 };
+        #[cfg(desktop)]
+        {
+            use tauri_plugin_autostart::ManagerExt;
+
+            let autolaunch = app.autolaunch();
+            let result = if v {
+                autolaunch.enable()
+            } else {
+                autolaunch.disable()
+            };
+
+            if let Err(err) = result {
+                log::warn!("Failed to apply launch-at-login setting: {}", err);
+            }
+        }
     }
     if let Some(v) = settings.paste_delay_ms {
         current.paste_delay_ms = v.clamp(50, 500);
@@ -81,13 +95,13 @@ pub async fn get_api_key(state: State<'_, AppState>) -> Result<ApiKeyStatus, Str
     }
 
     // Fallback to SQLite (backward compat) and migrate if found
-    let db = state.db.lock().await;
+    let db = &state.db;
     let api_key = db.get_api_key().await.map_err(|e| e.to_string())?;
     let exists = api_key.is_some();
 
     if exists {
         // Trigger migration in the background
-        keychain::migrate_api_key_from_db(&db).await;
+        keychain::migrate_api_key_from_db(db).await;
     }
 
     log::info!("get_api_key: exists={} (from SQLite fallback)", exists);
@@ -129,7 +143,7 @@ pub async fn set_api_key(
         match keychain::store_api_key(&api_key) {
             Ok(()) => {
                 // Clear from SQLite if it was stored there (backward compat cleanup)
-                let db = state.db.lock().await;
+                let db = &state.db;
                 let _ = db.delete_api_key().await;
 
                 log::info!("API key saved to Keychain");
@@ -142,7 +156,7 @@ pub async fn set_api_key(
             Err(e) => {
                 log::error!("Failed to save API key to Keychain: {}", e);
                 // Fallback: save to SQLite if Keychain fails
-                let db = state.db.lock().await;
+                let db = &state.db;
                 db.set_api_key(&api_key).await.map_err(|e| e.to_string())?;
                 log::warn!("API key saved to SQLite as Keychain fallback");
                 Ok(SetApiKeyResponse {
@@ -173,7 +187,7 @@ pub async fn delete_api_key(state: State<'_, AppState>) -> Result<DeleteResponse
     }
 
     // Also clear from SQLite (backward compat cleanup)
-    let db = state.db.lock().await;
+    let db = &state.db;
     if let Err(e) = db.delete_api_key().await {
         log::warn!("Failed to clear API key from SQLite: {}", e);
     }

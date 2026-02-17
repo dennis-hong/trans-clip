@@ -118,9 +118,9 @@ pub async fn get_monitors(app: tauri::AppHandle) -> Result<Vec<MonitorInfo>, Str
         .map(|monitor| {
             let pos = monitor.position();
             let size = monitor.size();
-            let is_primary = primary.as_ref().is_some_and(|p| {
-                p.position() == monitor.position() && p.size() == monitor.size()
-            });
+            let is_primary = primary
+                .as_ref()
+                .is_some_and(|p| p.position() == monitor.position() && p.size() == monitor.size());
 
             MonitorInfo {
                 name: monitor.name().map(|s| s.to_string()),
@@ -219,7 +219,7 @@ pub async fn move_to_monitor(
     log::info!("Target monitor key: {}", monitor_key);
 
     // Get saved width for this monitor or calculate adaptive width
-    let db = state.db.lock().await;
+    let db = &state.db;
     let target_width = match db.get_monitor_window_width(&monitor_key).await {
         Ok(Some(saved_width)) => {
             log::info!(
@@ -240,8 +240,6 @@ pub async fn move_to_monitor(
             adaptive_width
         }
     };
-    drop(db);
-
     // Get current window scale
     let current_scale = window.scale_factor().map_err(|e| e.to_string())?;
 
@@ -425,7 +423,7 @@ pub async fn get_current_monitor_info(
         monitor.scale_factor(),
     );
 
-    let db = state.db.lock().await;
+    let db = &state.db;
     let saved_width = db
         .get_monitor_window_width(&monitor_key)
         .await
@@ -480,7 +478,7 @@ pub async fn save_window_width_for_monitor(
 
     log::info!("Saving window width {} for monitor {}", width, monitor_key);
 
-    let db = state.db.lock().await;
+    let db = &state.db;
     db.save_monitor_window_width(&monitor_key, width)
         .await
         .map_err(|e| e.to_string())?;
@@ -806,7 +804,7 @@ pub async fn set_drawer_mode(
     let monitor_key = generate_monitor_key(mon_size.width, mon_size.height, scale);
 
     // Get saved width for this monitor or calculate adaptive width
-    let db = state.db.lock().await;
+    let db = &state.db;
     let saved_width = match db.get_monitor_window_width(&monitor_key).await {
         Ok(Some(w)) => {
             log::info!(
@@ -826,14 +824,12 @@ pub async fn set_drawer_mode(
             adaptive
         }
     };
-    drop(db);
-
     // Set new height based on mode
     let new_logical_height = match mode.as_str() {
-        "collapsed" => 48,  // Just header
-        "expanded" => 280,  // History view (header ~48px + padding ~24px + card 192px)
-        "full" => 450,      // Settings/Glossary view
-        "popup" => 350,     // Translation/Polish popup view
+        "collapsed" => 48, // Just header
+        "expanded" => 280, // History view (header ~48px + padding ~24px + card 192px)
+        "full" => 450,     // Settings/Glossary view
+        "popup" => 350,    // Translation/Polish popup view
         _ => 280,
     };
 
@@ -882,7 +878,6 @@ pub async fn open_postit_editor(
     app: tauri::AppHandle,
     mode: String,
     item_id: Option<String>,
-    initial_content: Option<String>,
 ) -> Result<(), String> {
     use tauri::WebviewUrl;
     use tauri::WebviewWindowBuilder;
@@ -895,10 +890,6 @@ pub async fn open_postit_editor(
 
     if let Some(id) = item_id {
         url_params.push(format!("itemId={}", urlencoding::encode(&id)));
-    }
-
-    if let Some(content) = initial_content {
-        url_params.push(format!("content={}", urlencoding::encode(&content)));
     }
 
     let url = format!("index.html?{}", url_params.join("&"));

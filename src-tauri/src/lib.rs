@@ -7,17 +7,15 @@ mod prompts;
 mod utils;
 
 use database::Database;
-use std::sync::Arc;
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, RunEvent, WindowEvent,
 };
-use tokio::sync::Mutex;
 
 pub struct AppState {
-    pub db: Arc<Mutex<Database>>,
+    pub db: Database,
 }
 
 fn show_main_window_and_emit(app: &tauri::AppHandle, event_name: &str) {
@@ -32,10 +30,13 @@ pub fn run() {
     // Initialize logger for debug output
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     log::info!("TransClip starting...");
-    
+
     tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None::<Vec<&str>>,
+        ))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -57,9 +58,7 @@ pub fn run() {
             })
             .map_err(|e| format!("Failed to initialize database: {}", e))?;
 
-            app.manage(AppState {
-                db: Arc::new(Mutex::new(db)),
-            });
+            app.manage(AppState { db });
 
             // macOS app menu (top menu bar) - add manual update action.
             #[cfg(target_os = "macos")]
@@ -170,21 +169,20 @@ pub fn run() {
             let startup_hotkey_interval_ms = {
                 let state = app.state::<AppState>();
                 tauri::async_runtime::block_on(async {
-                    let db = state.db.lock().await;
+                    let db = &state.db;
                     let mut interval_ms = 500_u64;
 
                     if let Ok(settings) = db.get_settings().await {
-                        hotkey::set_popup_position(&settings.popup_position);
                         if settings.double_press_interval > 0 {
                             interval_ms = (settings.double_press_interval as u64).clamp(200, 1000);
                         }
                     }
 
-                    // Only touch Keychain if a legacy SQLite key still exists.
-                    match db.get_api_key().await {
-                        Ok(Some(key)) if !key.is_empty() => {
-                            keychain::migrate_api_key_from_db(&db).await;
-                        }
+                        // Only touch Keychain if a legacy SQLite key still exists.
+                        match db.get_api_key().await {
+                            Ok(Some(key)) if !key.is_empty() => {
+                                keychain::migrate_api_key_from_db(db).await;
+                            }
                         Ok(_) => {}
                         Err(e) => {
                             log::warn!("Failed to check legacy API key before migration: {}", e);
@@ -239,6 +237,7 @@ pub fn run() {
             commands::polish::polish_stream,
             // Clipboard commands
             commands::clipboard::get_clipboard_history,
+            commands::clipboard::get_clipboard_item,
             commands::clipboard::delete_clipboard_item,
             commands::clipboard::clear_clipboard_history,
             commands::clipboard::toggle_pin_clipboard_item,
@@ -267,6 +266,7 @@ pub fn run() {
             commands::system::open_accessibility_settings,
             commands::system::show_translation_popup,
             commands::system::hide_translation_popup,
+            commands::system::open_feedback_page,
             // Window management commands
             commands::window::get_monitors,
             commands::window::get_current_monitor_index,

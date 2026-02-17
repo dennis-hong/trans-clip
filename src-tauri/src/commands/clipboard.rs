@@ -20,8 +20,8 @@ static PREVIOUS_APP_BUNDLE_ID: Mutex<Option<String>> = Mutex::new(None);
 /// Called from hotkey handlers before showing the TransClip popup.
 #[cfg(target_os = "macos")]
 pub fn save_frontmost_app() {
-    use objc::{msg_send, sel, sel_impl, class};
     use objc::runtime::Object;
+    use objc::{class, msg_send, sel, sel_impl};
     use std::ffi::CStr;
 
     unsafe {
@@ -69,7 +69,7 @@ pub async fn get_clipboard_history(
     offset: Option<i32>,
     search_query: Option<String>,
 ) -> Result<ClipboardHistoryResponse, String> {
-    let db = state.db.lock().await;
+    let db = &state.db;
     let limit = limit.unwrap_or(50).min(200);
     let offset = offset.unwrap_or(0);
 
@@ -90,7 +90,7 @@ pub async fn delete_clipboard_item(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<DeleteResponse, String> {
-    let db = state.db.lock().await;
+    let db = &state.db;
     let deleted = db
         .delete_clipboard_item(&id)
         .await
@@ -113,11 +113,26 @@ pub async fn delete_clipboard_item(
 }
 
 #[tauri::command]
+pub async fn get_clipboard_item(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<ClipboardItemResponse, String> {
+    let db = &state.db;
+    let item = db
+        .get_clipboard_item_by_id(&id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    item.map(ClipboardItemResponse::from)
+        .ok_or_else(|| "Clipboard item not found".to_string())
+}
+
+#[tauri::command]
 pub async fn toggle_pin_clipboard_item(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<PinResponse, String> {
-    let db = state.db.lock().await;
+    let db = &state.db;
     let result = db
         .toggle_pin_clipboard_item(&id)
         .await
@@ -145,7 +160,7 @@ pub async fn toggle_pin_clipboard_item(
 pub async fn clear_clipboard_history(
     state: State<'_, AppState>,
 ) -> Result<ClearHistoryResponse, String> {
-    let db = state.db.lock().await;
+    let db = &state.db;
     let deleted_count = db
         .clear_all_clipboard_items()
         .await
@@ -190,7 +205,7 @@ pub async fn create_clipboard_item(
 
     let id = uuid::Uuid::new_v4().to_string();
 
-    let db = state.db.lock().await;
+    let db = &state.db;
     let item = db
         .create_clipboard_item(&id, &content, &content_preview, character_count, word_count)
         .await
@@ -230,7 +245,7 @@ pub async fn update_clipboard_item(
     let character_count = content.chars().count() as i32;
     let word_count = content.split_whitespace().count() as i32;
 
-    let db = state.db.lock().await;
+    let db = &state.db;
     let item = db
         .update_clipboard_item_content(&id, &content, &content_preview, character_count, word_count)
         .await
@@ -247,8 +262,8 @@ pub async fn set_clipboard(text: String) -> Result<(), String> {
     {
         use cocoa::base::nil;
         use cocoa::foundation::NSString;
-        use objc::{msg_send, sel, sel_impl, class};
         use objc::runtime::Object;
+        use objc::{class, msg_send, sel, sel_impl};
 
         unsafe {
             let pasteboard: *mut Object = msg_send![class!(NSPasteboard), generalPasteboard];
@@ -305,7 +320,7 @@ pub async fn paste_text(state: State<'_, AppState>, text: String) -> Result<Past
 
     // Get paste delay from settings
     let paste_delay_ms = {
-        let db = state.db.lock().await;
+        let db = &state.db;
         db.get_settings()
             .await
             .map(|s| s.paste_delay_ms)

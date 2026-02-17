@@ -1,3 +1,114 @@
-// Streaming utilities for Claude API SSE processing
-// Currently unused - translate_stream and polish_stream use inline processing
-// Kept for potential future refactoring
+use futures_util::StreamExt;
+use std::sync::OnceLock;
+use std::time::Duration;
+
+pub struct AnthropicStreamResult {
+    pub full_text: String,
+    pub input_tokens: Option<i32>,
+    pub output_tokens: Option<i32>,
+}
+
+pub fn anthropic_http_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(90))
+            .build()
+            .unwrap_or_else(|err| {
+                log::warn!(
+                    "Failed to build configured HTTP client, falling back to default: {}",
+                    err
+                );
+                reqwest::Client::new()
+            })
+    })
+}
+
+fn process_sse_line(
+    line: &str,
+    full_text: &mut String,
+    input_tokens: &mut Option<i32>,
+    output_tokens: &mut Option<i32>,
+    on_delta: &mut impl FnMut(&str),
+) {
+    if let Some(json_str) = line.strip_prefix("data: ") {
+        if json_str == "[DONE]" {
+            return;
+        }
+
+        if let Ok(event) = serde_json::from_str::<serde_json::Value>(json_str) {
+            match event["type"].as_str().unwrap_or("") {
+                "content_block_delta" => {
+                    if let Some(delta) = event["delta"]["text"].as_str() {
+                        full_text.push_str(delta);
+                        on_delta(delta);
+                    }
+                }
+                "message_start" => {
+                    if let Some(usage) = event["message"]["usage"].as_object() {
+                        *input_tokens = usage["input_tokens"].as_i64().map(|v| v as i32);
+                    }
+                }
+                "message_delta" => {
+                    if let Some(usage) = event["usage"].as_object() {
+                        *output_tokens = usage["output_tokens"].as_i64().map(|v| v as i32);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+pub async fn stream_anthropic_sse(
+    res: reqwest::Response,
+    mut on_delta: impl FnMut(&str),
+) -> Result<AnthropicStreamResult, String> {
+    let mut full_text = String::new();
+    let mut input_tokens: Option<i32> = None;
+    let mut output_tokens: Option<i32> = None;
+    let mut stream = res.bytes_stream();
+    let mut buffer = String::new();
+
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(bytes) => {
+                let chunk_str = String::from_utf8_lossy(&bytes);
+                buffer.push_str(&chunk_str);
+
+                while let Some(pos) = buffer.find('\n') {
+                    let line = buffer[..pos].trim().to_string();
+                    buffer = buffer[pos + 1..].to_string();
+                    process_sse_line(
+                        &line,
+                        &mut full_text,
+                        &mut input_tokens,
+                        &mut output_tokens,
+                        &mut on_delta,
+                    );
+                }
+            }
+            Err(err) => {
+                return Err(format!("Stream error: {}", err));
+            }
+        }
+    }
+
+    if !buffer.trim().is_empty() {
+        process_sse_line(
+            buffer.trim(),
+            &mut full_text,
+            &mut input_tokens,
+            &mut output_tokens,
+            &mut on_delta,
+        );
+    }
+
+    Ok(AnthropicStreamResult {
+        full_text,
+        input_tokens,
+        output_tokens,
+    })
+}

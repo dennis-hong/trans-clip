@@ -24,9 +24,11 @@ pub async fn start_hotkey_monitor(
     }
 
     let interval_ms = {
-        let db = state.db.lock().await;
+        let db = &state.db;
         match db.get_settings().await {
-            Ok(settings) if settings.double_press_interval > 0 => settings.double_press_interval as u64,
+            Ok(settings) if settings.double_press_interval > 0 => {
+                settings.double_press_interval as u64
+            }
             Ok(_) => 500,
             Err(err) => {
                 log::warn!(
@@ -73,5 +75,12 @@ pub async fn hide_translation_popup(app: tauri::AppHandle) -> Result<(), String>
     if let Some(window) = app.get_webview_window("main") {
         window.hide().map_err(|e| e.to_string())?;
     }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn open_feedback_page() -> Result<(), String> {
+    open::that("https://github.com/dennis-hong/trans-clip/issues")
+        .map_err(|e| format!("Failed to open feedback page: {}", e))?;
     Ok(())
 }

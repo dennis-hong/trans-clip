@@ -6,32 +6,66 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 interface EditorParams {
   mode: "create" | "edit";
   itemId?: string;
-  initialContent: string;
 }
 
 function parseUrlParams(): EditorParams {
   const params = new URLSearchParams(window.location.search);
-  const mode = params.get("mode") as "create" | "edit" || "create";
+  const mode = params.get("mode") === "edit" ? "edit" : "create";
   const itemId = params.get("itemId") || undefined;
-  const content = params.get("content") || "";
 
   return {
     mode,
     itemId,
-    initialContent: decodeURIComponent(content),
   };
 }
 
 export function PostItEditorWindow() {
   const params = useMemo(() => parseUrlParams(), []);
-  const [content, setContent] = useState(params.initialContent);
+  const [content, setContent] = useState("");
+  const [isLoadingItem, setIsLoadingItem] = useState(
+    params.mode === "edit" && Boolean(params.itemId)
+  );
   const [isSaving, setIsSaving] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  useEffect(() => {
+    if (params.mode !== "edit" || !params.itemId) {
+      setIsLoadingItem(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadItem = async () => {
+      try {
+        const item = await invoke<{ content: string }>("get_clipboard_item", {
+          id: params.itemId,
+        });
+        if (!cancelled) {
+          setContent(item.content ?? "");
+        }
+      } catch (error) {
+        console.error("Failed to load item for editing:", error);
+      } finally {
+        if (!cancelled) {
+          setIsLoadingItem(false);
+        }
+      }
+    };
+
+    void loadItem();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [params.itemId, params.mode]);
+
   // Focus textarea on mount
   useEffect(() => {
-    textareaRef.current?.focus();
-  }, []);
+    if (!isLoadingItem) {
+      textareaRef.current?.focus();
+    }
+  }, [isLoadingItem]);
 
   const handleSave = useCallback(async () => {
     const trimmedContent = content.trim();
@@ -147,6 +181,7 @@ export function PostItEditorWindow() {
           value={content}
           onChange={(e) => setContent(e.target.value)}
           placeholder="메모 내용을 입력하세요..."
+          disabled={isLoadingItem || isSaving}
           className="flex-1 w-full p-4 bg-yellow-50 border-2 border-yellow-200 rounded-lg resize-none text-sm text-gray-800 leading-relaxed focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400 placeholder:text-gray-400"
         />
 
@@ -179,7 +214,7 @@ export function PostItEditorWindow() {
         </button>
         <button
           onClick={handleSave}
-          disabled={!content.trim() || isSaving}
+          disabled={!content.trim() || isSaving || isLoadingItem}
           className="px-4 py-2 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {isSaving ? "저장 중..." : "저장"}

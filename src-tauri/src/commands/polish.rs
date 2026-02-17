@@ -1,7 +1,7 @@
 use crate::keychain;
 use crate::prompts;
+use crate::utils::streaming::{anthropic_http_client, stream_anthropic_sse};
 use crate::AppState;
-use futures_util::StreamExt;
 use tauri::ipc::Channel;
 use tauri::State;
 
@@ -44,7 +44,7 @@ pub async fn polish(
         });
     }
 
-    let db = state.db.lock().await;
+    let db = &state.db;
     let settings = db.get_settings().await.map_err(|e| e.to_string())?;
 
     // Get API key from Keychain (with SQLite fallback)
@@ -81,11 +81,8 @@ pub async fn polish(
     let user_prompt =
         prompts::polish::build_user_prompt(&text, &context, &channel, &options, &detected_lang);
 
-    // Release DB lock before external API call to avoid blocking unrelated DB operations.
-    drop(db);
-
     // Call Claude API
-    let client = reqwest::Client::new();
+    let client = anthropic_http_client();
     let response = client
         .post("https://api.anthropic.com/v1/messages")
         .header("x-api-key", &api_key)
@@ -191,7 +188,7 @@ pub async fn polish_stream(
         return Ok(());
     }
 
-    let db = state.db.lock().await;
+    let db = &state.db;
     let settings = db.get_settings().await.map_err(|e| e.to_string())?;
 
     // Get API key from Keychain (with SQLite fallback)
@@ -228,11 +225,8 @@ pub async fn polish_stream(
     let user_prompt =
         prompts::polish::build_user_prompt(&text, &context, &channel, &options, &detected_lang);
 
-    // Release the db lock before making the API call
-    drop(db);
-
     // Call Claude API with streaming
-    let client = reqwest::Client::new();
+    let client = anthropic_http_client();
     let response = client
         .post("https://api.anthropic.com/v1/messages")
         .header("x-api-key", &api_key)
@@ -266,75 +260,23 @@ pub async fn polish_stream(
                 return Ok(());
             }
 
-            // Process SSE stream
-            let mut full_text = String::new();
-            let mut input_tokens: Option<i32> = None;
-            let mut output_tokens: Option<i32> = None;
-            let mut stream = res.bytes_stream();
+            let stream_result = stream_anthropic_sse(res, |delta| {
+                let _ = on_event.send(PolishStreamEvent::Delta {
+                    text: delta.to_string(),
+                });
+            })
+            .await;
 
-            let mut buffer = String::new();
-
-            while let Some(chunk) = stream.next().await {
-                match chunk {
-                    Ok(bytes) => {
-                        let chunk_str = String::from_utf8_lossy(&bytes);
-                        buffer.push_str(&chunk_str);
-
-                        // Process complete lines
-                        while let Some(pos) = buffer.find('\n') {
-                            let line = buffer[..pos].trim().to_string();
-                            buffer = buffer[pos + 1..].to_string();
-
-                            if let Some(json_str) = line.strip_prefix("data: ") {
-                                if json_str == "[DONE]" {
-                                    continue;
-                                }
-
-                                if let Ok(event) =
-                                    serde_json::from_str::<serde_json::Value>(json_str)
-                                {
-                                    let event_type = event["type"].as_str().unwrap_or("");
-
-                                    match event_type {
-                                        "content_block_delta" => {
-                                            if let Some(delta) = event["delta"]["text"].as_str() {
-                                                full_text.push_str(delta);
-                                                let _ = on_event.send(PolishStreamEvent::Delta {
-                                                    text: delta.to_string(),
-                                                });
-                                            }
-                                        }
-                                        "message_start" => {
-                                            if let Some(usage) =
-                                                event["message"]["usage"].as_object()
-                                            {
-                                                input_tokens = usage["input_tokens"]
-                                                    .as_i64()
-                                                    .map(|v| v as i32);
-                                            }
-                                        }
-                                        "message_delta" => {
-                                            if let Some(usage) = event["usage"].as_object() {
-                                                output_tokens = usage["output_tokens"]
-                                                    .as_i64()
-                                                    .map(|v| v as i32);
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let _ = on_event.send(PolishStreamEvent::Error {
-                            code: "STREAM_ERROR".to_string(),
-                            message: format!("Stream error: {}", e),
-                        });
-                        return Ok(());
-                    }
+            let (full_text, input_tokens, output_tokens) = match stream_result {
+                Ok(result) => (result.full_text, result.input_tokens, result.output_tokens),
+                Err(err) => {
+                    let _ = on_event.send(PolishStreamEvent::Error {
+                        code: "STREAM_ERROR".to_string(),
+                        message: err,
+                    });
+                    return Ok(());
                 }
-            }
+            };
 
             // Send Completed event
             let _ = on_event.send(PolishStreamEvent::Completed {
