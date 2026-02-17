@@ -1,0 +1,4 @@
+interface:
+  display_name: "Trans Clip Project"
+  short_description: "Repository-specific workflow for trans-clip"
+  default_prompt: "Implement and validate a change in the trans-clip repository using its React/TypeScript + Tauri/Rust conventions."
