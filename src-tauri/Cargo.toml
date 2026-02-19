@@ -1,6 +1,6 @@
 [package]
 name = "trans-clip"
-version = "0.1.17"
+version = "0.1.18"
 description = "Korean-English translation and clipboard management app"
 authors = ["TransClip"]
 license = "MIT"
