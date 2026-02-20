@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState, useRef, useMemo } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { emit } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 interface EditorParams {
@@ -8,10 +8,9 @@ interface EditorParams {
   itemId?: string;
 }
 
-function parseUrlParams(): EditorParams {
-  const params = new URLSearchParams(window.location.search);
-  const mode = params.get("mode") === "edit" ? "edit" : "create";
-  const itemId = params.get("itemId") || undefined;
+function normalizeEditorParams(params: Partial<EditorParams> | null | undefined): EditorParams {
+  const mode = params?.mode === "edit" ? "edit" : "create";
+  const itemId = params?.itemId || undefined;
 
   return {
     mode,
@@ -19,14 +18,36 @@ function parseUrlParams(): EditorParams {
   };
 }
 
+function parseUrlParams(): EditorParams {
+  const params = new URLSearchParams(window.location.search);
+  return normalizeEditorParams({
+    mode: params.get("mode") === "edit" ? "edit" : "create",
+    itemId: params.get("itemId") || undefined,
+  });
+}
+
 export function PostItEditorWindow() {
-  const params = useMemo(() => parseUrlParams(), []);
+  const [params, setParams] = useState<EditorParams>(() => parseUrlParams());
   const [content, setContent] = useState("");
   const [isLoadingItem, setIsLoadingItem] = useState(
     params.mode === "edit" && Boolean(params.itemId)
   );
   const [isSaving, setIsSaving] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const unlisten = listen<EditorParams>("postit_editor_open", (event) => {
+      const nextParams = normalizeEditorParams(event.payload);
+      setParams(nextParams);
+      setContent("");
+      setIsSaving(false);
+      setIsLoadingItem(nextParams.mode === "edit" && Boolean(nextParams.itemId));
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
 
   useEffect(() => {
     if (params.mode !== "edit" || !params.itemId) {
@@ -88,11 +109,10 @@ export function PostItEditorWindow() {
       // Emit event to notify main window
       await emit("postit_saved", { mode: params.mode, itemId: params.itemId });
 
-      // Close this window after a small delay to allow WebKit to finish processing
-      // This prevents a race condition that can cause WebKit crashes
+      // Hide the editor instead of closing it to avoid WebKit window teardown races.
       const currentWindow = getCurrentWindow();
       await new Promise((resolve) => setTimeout(resolve, 50));
-      await currentWindow.close();
+      await currentWindow.hide();
     } catch (error) {
       console.error("Failed to save:", error);
       setIsSaving(false);
@@ -100,10 +120,11 @@ export function PostItEditorWindow() {
   }, [content, params, isSaving]);
 
   const handleClose = useCallback(async () => {
+    setIsSaving(false);
     const currentWindow = getCurrentWindow();
-    // Small delay to allow WebKit to finish processing before window destruction
+    // Small delay to let pending UI tasks settle before hiding.
     await new Promise((resolve) => setTimeout(resolve, 50));
-    await currentWindow.close();
+    await currentWindow.hide();
   }, []);
 
   // Handle keyboard shortcuts

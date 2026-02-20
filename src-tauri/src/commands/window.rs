@@ -3,12 +3,20 @@ use crate::utils::monitor::{
 };
 use crate::AppState;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 use super::types::{CurrentMonitorInfo, MonitorInfo, SnapEdge, SnapResult, WindowPosition};
 
 // Store the last valid monitor index to preserve position across hide/show cycles
 static LAST_MONITOR_INDEX: AtomicUsize = AtomicUsize::new(0);
+const POSTIT_EDITOR_LABEL: &str = "postit-editor";
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PostItEditorOpenPayload {
+    mode: String,
+    item_id: Option<String>,
+}
 
 pub fn get_last_monitor_index() -> usize {
     LAST_MONITOR_INDEX.load(Ordering::SeqCst)
@@ -882,14 +890,20 @@ pub async fn open_postit_editor(
     use tauri::WebviewUrl;
     use tauri::WebviewWindowBuilder;
 
-    // Generate a unique window label
-    let window_label = format!("postit-editor-{}", uuid::Uuid::new_v4());
+    let normalized_mode = if mode == "edit" { "edit" } else { "create" };
+    let payload = PostItEditorOpenPayload {
+        mode: normalized_mode.to_string(),
+        item_id,
+    };
 
     // Build URL with parameters
-    let mut url_params = vec![format!("window=editor"), format!("mode={}", mode)];
+    let mut url_params = vec![
+        "window=editor".to_string(),
+        format!("mode={}", payload.mode),
+    ];
 
-    if let Some(id) = item_id {
-        url_params.push(format!("itemId={}", urlencoding::encode(&id)));
+    if let Some(id) = payload.item_id.as_ref() {
+        url_params.push(format!("itemId={}", urlencoding::encode(id)));
     }
 
     let url = format!("index.html?{}", url_params.join("&"));
@@ -932,13 +946,38 @@ pub async fn open_postit_editor(
         (None, None)
     };
 
+    if let Some(window) = app.get_webview_window(POSTIT_EDITOR_LABEL) {
+        if let (Some(x), Some(y)) = (editor_x, editor_y) {
+            window
+                .set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }))
+                .map_err(|e| format!("Failed to position existing editor window: {}", e))?;
+        } else {
+            window
+                .center()
+                .map_err(|e| format!("Failed to center existing editor window: {}", e))?;
+        }
+
+        window
+            .emit("postit_editor_open", payload)
+            .map_err(|e| format!("Failed to notify existing editor window: {}", e))?;
+        window
+            .show()
+            .map_err(|e| format!("Failed to show existing editor window: {}", e))?;
+        window
+            .set_focus()
+            .map_err(|e| format!("Failed to focus existing editor window: {}", e))?;
+
+        return Ok(());
+    }
+
     // Create the new window
-    let mut builder = WebviewWindowBuilder::new(&app, &window_label, WebviewUrl::App(url.into()))
-        .title("메모 편집")
-        .inner_size(500.0, 400.0)
-        .min_inner_size(400.0, 300.0)
-        .decorations(true)
-        .always_on_top(true);
+    let mut builder =
+        WebviewWindowBuilder::new(&app, POSTIT_EDITOR_LABEL, WebviewUrl::App(url.into()))
+            .title("메모 편집")
+            .inner_size(500.0, 400.0)
+            .min_inner_size(400.0, 300.0)
+            .decorations(true)
+            .always_on_top(true);
 
     // Set position if we calculated it, otherwise center
     if let (Some(x), Some(y)) = (editor_x, editor_y) {
