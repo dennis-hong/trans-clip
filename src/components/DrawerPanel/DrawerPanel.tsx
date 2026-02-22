@@ -572,6 +572,9 @@ export function DrawerPanel({
         {/* Title or Search */}
         {currentView === "history" ? (
           <div className="relative flex-1 max-w-xs">
+            <label htmlFor="drawer-history-search" className="sr-only">
+              클립보드 히스토리 검색
+            </label>
             <svg
               className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
               fill="none"
@@ -586,9 +589,11 @@ export function DrawerPanel({
               />
             </svg>
             <input
+              id="drawer-history-search"
               type="text"
               value={searchQuery}
               onChange={(e) => handleSearch(e.target.value)}
+              aria-label="클립보드 히스토리 검색"
               placeholder="검색..."
               className="w-full pl-8 pr-3 py-1.5 bg-white/80 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
               onClick={(e) => e.stopPropagation()}
@@ -761,58 +766,70 @@ export function DrawerPanel({
       {!isCollapsed && (
         <div className="flex-1 overflow-hidden">
           {currentView === "history" && (
-            <div
-              ref={scrollRef}
-              onWheel={handleWheel}
-              className="h-full flex items-start gap-4 px-4 py-3 overflow-x-auto overflow-y-hidden scroll-smooth"
-              style={{
-                scrollbarWidth: "thin",
-                scrollbarColor: "rgba(156, 163, 175, 0.5) transparent",
-              }}
-            >
-              {/* Create new post-it card - always shown first */}
-              <CreatePostItCard onClick={handleCreateNewItem} />
+            <div className="relative h-full">
+              <p
+                id="history-scroll-hint"
+                className="pointer-events-none absolute top-2 right-4 z-10 rounded-full border border-gray-200 bg-white/85 px-2 py-0.5 text-[10px] text-gray-500 shadow-sm"
+              >
+                좌우로 스크롤
+              </p>
+              <div
+                ref={scrollRef}
+                onWheel={handleWheel}
+                aria-describedby="history-scroll-hint"
+                className="h-full flex items-start gap-4 px-4 py-3 overflow-x-auto overflow-y-hidden scroll-smooth"
+                style={{
+                  scrollbarWidth: "thin",
+                  scrollbarColor: "rgba(156, 163, 175, 0.5) transparent",
+                }}
+              >
+                {/* Create new post-it card - always shown first */}
+                <CreatePostItCard onClick={handleCreateNewItem} />
 
-              {isLoading && items.length === 0 ? (
-                <div className="flex items-center justify-center w-full py-8">
-                  <div className="animate-spin w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full" />
-                </div>
-              ) : items.length === 0 ? (
-                <div className="flex flex-col items-center justify-center flex-1 py-8 text-center">
-                  <svg
-                    className="w-12 h-12 text-gray-300"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={1.5}
-                      d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                {isLoading && items.length === 0 ? (
+                  <div className="flex items-center justify-center w-full py-8" role="status" aria-live="polite">
+                    <div className="flex items-center gap-2 text-sm text-blue-600">
+                      <div className="animate-spin w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full" />
+                      <span>히스토리를 불러오는 중...</span>
+                    </div>
+                  </div>
+                ) : items.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center flex-1 py-8 text-center">
+                    <svg
+                      className="w-12 h-12 text-gray-300"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={1.5}
+                        d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                      />
+                    </svg>
+                    <p className="mt-2 text-sm text-gray-500">
+                      {searchQuery ? "검색 결과가 없습니다" : "새 메모를 만들어보세요"}
+                    </p>
+                  </div>
+                ) : (
+                  sortedItems.map((item, index) => (
+                    <PostItCard
+                      key={item.id}
+                      item={item}
+                      index={index}
+                      onCopy={handleCopy}
+                      onPaste={handlePaste}
+                      onDelete={handleDelete}
+                      onTogglePin={handleTogglePin}
+                      onTranslate={onTranslate ? handleTranslateItem : undefined}
+                      onPolish={onPolish ? handlePolishItem : undefined}
+                      onEdit={handleEditItem}
+                      showPasteButton={isStealthMode}
                     />
-                  </svg>
-                  <p className="mt-2 text-sm text-gray-500">
-                    {searchQuery ? "검색 결과가 없습니다" : "새 메모를 만들어보세요"}
-                  </p>
-                </div>
-              ) : (
-                sortedItems.map((item, index) => (
-                  <PostItCard
-                    key={item.id}
-                    item={item}
-                    index={index}
-                    onCopy={handleCopy}
-                    onPaste={handlePaste}
-                    onDelete={handleDelete}
-                    onTogglePin={handleTogglePin}
-                    onTranslate={onTranslate ? handleTranslateItem : undefined}
-                    onPolish={onPolish ? handlePolishItem : undefined}
-                    onEdit={handleEditItem}
-                    showPasteButton={isStealthMode}
-                  />
-                ))
-              )}
+                  ))
+                )}
+              </div>
             </div>
           )}
 

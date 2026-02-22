@@ -135,6 +135,13 @@ export function TranslationPopup({
 
   // Determine if we have content to display
   const hasResult = Boolean(fullText || streamedText);
+  const resultStatusMessage = error
+    ? "번역에 문제가 생겼습니다."
+    : isStreaming
+      ? "번역 중입니다."
+      : hasResult
+        ? "번역이 완료되었습니다."
+        : "번역을 준비 중입니다.";
 
   return (
     <div className="flex flex-col h-full w-full">
@@ -246,9 +253,21 @@ export function TranslationPopup({
                 {targetLabel}
               </span>
             </div>
-            <div className="flex-1 p-4 bg-blue-100 border-2 border-blue-300 rounded-lg shadow-md overflow-y-auto">
+            <div
+              className="flex-1 p-4 bg-blue-100 border-2 border-blue-300 rounded-lg shadow-md overflow-y-auto"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              aria-label="번역 결과"
+            >
+              <span className="sr-only">{resultStatusMessage}</span>
               {error ? (
-                <p className="text-sm text-red-600">{error}</p>
+                <div>
+                  <p className="text-sm text-red-700">
+                    번역에 문제가 생겼습니다. 다시 시도해 주세요.
+                  </p>
+                  <p className="mt-1 text-xs text-red-600 break-words">{error}</p>
+                </div>
               ) : (fullText || streamedText) ? (
                 <p className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
                   {fullText || streamedText}
@@ -284,9 +303,9 @@ export function TranslationPopup({
       </div>
 
       {/* Footer - 액션 버튼 */}
-      <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-200/50">
+      <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-t border-gray-200/50">
         {/* Model selector + Retranslate button group */}
-        <div className="flex items-center gap-2 mr-auto">
+        <div className="flex flex-wrap items-center gap-2 mr-auto">
           <label className="text-[10px] text-gray-500">모델</label>
           <select
             value={selectedModel ?? ""}
@@ -308,33 +327,40 @@ export function TranslationPopup({
             다시 번역
           </button>
         </div>
-        <button
-          onClick={handleSaveAsPostIt}
-          disabled={isStreaming || !hasResult || isSaved}
-          className={`px-4 py-2 text-sm font-medium border rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-            isSaved
-              ? "text-green-700 bg-green-50 border-green-300"
-              : "text-amber-700 bg-white border-amber-300 hover:bg-amber-50"
-          }`}
-        >
-          {isSaved ? "저장됨!" : "메모로 저장"}
-        </button>
-        <button
-          onClick={handleCopy}
-          disabled={isStreaming || !hasResult}
-          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          복사
-        </button>
-        <button
-          onClick={handleReplace}
-          disabled={isStreaming || !hasResult}
-          className="px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          title="바꾸기 (⌘+Enter)"
-        >
-          바꾸기
-          <span className="ml-1.5 text-[10px] opacity-70">⌘↵</span>
-        </button>
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          <div className="hidden sm:flex items-center gap-1 text-[10px] text-gray-400">
+            <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">ESC</span>
+            <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">⌘↵</span>
+            <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">Ctrl↵</span>
+          </div>
+          <button
+            onClick={handleSaveAsPostIt}
+            disabled={isStreaming || !hasResult || isSaved}
+            className={`px-4 py-2 text-sm font-medium border rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+              isSaved
+                ? "text-green-700 bg-green-50 border-green-300"
+                : "text-amber-700 bg-white border-amber-300 hover:bg-amber-50"
+            }`}
+          >
+            {isSaved ? "저장됨!" : "메모로 저장"}
+          </button>
+          <button
+            onClick={handleCopy}
+            disabled={isStreaming || !hasResult}
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            복사
+          </button>
+          <button
+            onClick={handleReplace}
+            disabled={isStreaming || !hasResult}
+            className="px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            title="바꾸기 (⌘+Enter / Ctrl+Enter)"
+          >
+            바꾸기
+            <span className="ml-1.5 text-[10px] opacity-70">⌘↵ / Ctrl↵</span>
+          </button>
+        </div>
       </div>
     </div>
   );

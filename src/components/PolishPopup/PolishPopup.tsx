@@ -155,6 +155,13 @@ export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupPro
 
   // Determine if we have content to display
   const hasResult = Boolean(fullText || streamedText);
+  const resultStatusMessage = error
+    ? "글 다듬기에 문제가 생겼습니다."
+    : isStreaming
+      ? "글을 다듬는 중입니다."
+      : hasResult
+        ? "글 다듬기가 완료되었습니다."
+        : "글 다듬기를 준비 중입니다.";
 
   const handleContextChange = (context: PolishContext) => {
     setLastContext(context);
@@ -258,9 +265,21 @@ export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupPro
             <div className="flex items-center gap-2 mb-2 px-1">
               <span className="text-xs font-medium text-green-700">✨ 정돈된 결과</span>
             </div>
-            <div className="flex-1 p-3 bg-green-100 border-2 border-green-300 rounded-lg shadow-md overflow-y-auto">
+            <div
+              className="flex-1 p-3 bg-green-100 border-2 border-green-300 rounded-lg shadow-md overflow-y-auto"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              aria-label="다듬기 결과"
+            >
+              <span className="sr-only">{resultStatusMessage}</span>
               {error ? (
-                <p className="text-sm text-red-600">{error}</p>
+                <div>
+                  <p className="text-sm text-red-700">
+                    글 다듬기에 문제가 생겼습니다. 다시 시도해 주세요.
+                  </p>
+                  <p className="mt-1 text-xs text-red-600 break-words">{error}</p>
+                </div>
               ) : (fullText || streamedText) ? (
                 <p className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
                   {fullText || streamedText}
@@ -385,7 +404,12 @@ export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupPro
       </div>
 
       {/* Footer - 액션 버튼 */}
-      <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-200/50">
+      <div className="flex flex-wrap items-center justify-end gap-2 px-4 py-3 border-t border-gray-200/50">
+        <div className="hidden sm:flex items-center gap-1 text-[10px] text-gray-400 mr-auto">
+          <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">ESC</span>
+          <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">⌘↵</span>
+          <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">Ctrl↵</span>
+        </div>
         <button
           onClick={handleTranslate}
           disabled={isStreaming || !hasResult}
@@ -415,10 +439,10 @@ export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupPro
           onClick={handleReplace}
           disabled={isStreaming || !hasResult}
           className="px-4 py-2 text-sm font-medium text-white bg-purple-500 rounded-lg hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          title="바꾸기 (⌘+Enter)"
+          title="바꾸기 (⌘+Enter / Ctrl+Enter)"
         >
           바꾸기
-          <span className="ml-1.5 text-[10px] opacity-70">⌘↵</span>
+          <span className="ml-1.5 text-[10px] opacity-70">⌘↵ / Ctrl↵</span>
         </button>
       </div>
     </div>

@@ -48,6 +48,9 @@ export function Toast({ message, type = "success", duration = 2000, onClose }: T
 
   return (
     <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
       className={`
         fixed bottom-4 left-1/2 -translate-x-1/2 z-50
         flex items-center gap-2 px-4 py-2 rounded-lg shadow-lg

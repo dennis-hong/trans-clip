@@ -82,6 +82,9 @@ export function GlossaryList() {
       <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200/50">
         {/* Search */}
         <div className="relative flex-1 max-w-xs">
+          <label htmlFor="glossary-search" className="sr-only">
+            용어집 검색
+          </label>
           <svg
             className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
             fill="none"
@@ -96,9 +99,11 @@ export function GlossaryList() {
             />
           </svg>
           <input
+            id="glossary-search"
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            aria-label="용어집 검색"
             placeholder="용어 검색..."
             className="w-full pl-8 pr-3 py-1.5 bg-white/80 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none"
           />
@@ -125,55 +130,73 @@ export function GlossaryList() {
       </div>
 
       {/* Card List - 가로 스크롤 */}
-      <div
-        ref={scrollRef}
-        onWheel={handleWheel}
-        className="flex-1 flex items-start gap-4 px-4 py-3 overflow-x-auto overflow-y-hidden scroll-smooth"
-        style={{
-          scrollbarWidth: "thin",
-          scrollbarColor: "rgba(156, 163, 175, 0.5) transparent",
-        }}
-      >
-        {isLoading && entries.length === 0 ? (
-          <div className="flex items-center justify-center w-full py-8">
-            <div className="animate-spin w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full" />
-          </div>
-        ) : error ? (
-          <div className="flex items-center justify-center w-full py-8">
-            <p className="text-sm text-red-500">{error}</p>
-          </div>
-        ) : entries.length === 0 ? (
-          <div className="flex flex-col items-center justify-center w-full py-8 text-center">
-            <svg
-              className="w-12 h-12 text-gray-300"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.5}
-                d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+      <div className="relative flex-1">
+        <p
+          id="glossary-scroll-hint"
+          className="pointer-events-none absolute top-2 right-4 z-10 rounded-full border border-gray-200 bg-white/85 px-2 py-0.5 text-[10px] text-gray-500 shadow-sm"
+        >
+          좌우로 스크롤
+        </p>
+        <div
+          ref={scrollRef}
+          onWheel={handleWheel}
+          aria-describedby="glossary-scroll-hint"
+          className="h-full flex items-start gap-4 px-4 py-3 overflow-x-auto overflow-y-hidden scroll-smooth"
+          style={{
+            scrollbarWidth: "thin",
+            scrollbarColor: "rgba(156, 163, 175, 0.5) transparent",
+          }}
+        >
+          {isLoading && entries.length === 0 ? (
+            <div className="flex items-center justify-center w-full py-8" role="status" aria-live="polite">
+              <div className="flex items-center gap-2 text-sm text-purple-600">
+                <div className="animate-spin w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full" />
+                <span>용어집을 불러오는 중...</span>
+              </div>
+            </div>
+          ) : error ? (
+            <div className="flex items-center justify-center w-full py-8">
+              <p className="text-sm text-red-500">{error}</p>
+            </div>
+          ) : entries.length === 0 ? (
+            <div className="flex flex-col items-center justify-center w-full py-8 text-center">
+              <svg
+                className="w-12 h-12 text-gray-300"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+                />
+              </svg>
+              <p className="mt-2 text-sm text-gray-500">
+                {searchQuery ? "검색 결과가 없습니다" : "용어집이 비어있습니다"}
+              </p>
+              <p className="text-xs text-gray-500">
+                번역 품질을 높이려면 자주 쓰는 키워드를 용어집에 추가해 주세요.
+              </p>
+              <button
+                onClick={handleAddNew}
+                className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-purple-500 hover:bg-purple-600 rounded-md transition-colors"
+              >
+                용어 추가하기
+              </button>
+            </div>
+          ) : (
+            entries.map((entry) => (
+              <GlossaryCard
+                key={entry.id}
+                entry={entry}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
               />
-            </svg>
-            <p className="mt-2 text-sm text-gray-500">
-              {searchQuery ? "검색 결과가 없습니다" : "용어집이 비어있습니다"}
-            </p>
-            <p className="text-xs text-gray-400">
-              번역 품질 향상을 위해 용어를 추가하세요
-            </p>
-          </div>
-        ) : (
-          entries.map((entry) => (
-            <GlossaryCard
-              key={entry.id}
-              entry={entry}
-              onEdit={handleEdit}
-              onDelete={handleDelete}
-            />
-          ))
-        )}
+            ))
+          )}
+        </div>
       </div>
 
       {/* Editor Modal */}

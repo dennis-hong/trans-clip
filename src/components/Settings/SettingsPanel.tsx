@@ -270,6 +270,7 @@ export function SettingsPanel() {
               onChange={handleLaunchAtLoginChange}
               disabled={isLoading}
               color="gray"
+              label="로그인 시 시작"
             />
           </div>
 
@@ -377,10 +378,18 @@ export function SettingsPanel() {
 
         {isDownloading && (
           <div className="space-y-1">
-            <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+            <div
+              className="h-1.5 bg-gray-200 rounded-full overflow-hidden"
+              role="progressbar"
+              aria-label="업데이트 다운로드 진행률"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={progress}
+              aria-valuetext={`${progress}%`}
+            >
               <div className="h-full bg-blue-500 transition-all" style={{ width: `${progress}%` }} />
             </div>
-            <p className="text-[10px] text-gray-500">업데이트 다운로드 중... {progress}%</p>
+            <p className="text-[10px] text-gray-500">업데이트 다운로드 중 ({progress}%)</p>
           </div>
         )}
 
@@ -440,6 +449,7 @@ interface ToggleSwitchProps {
   onChange: (enabled: boolean) => void;
   disabled?: boolean;
   color: "yellow" | "blue" | "green" | "orange" | "pink" | "gray";
+  label: string;
 }
 
 const toggleColors = {
@@ -451,10 +461,13 @@ const toggleColors = {
   gray: "bg-gray-500",
 };
 
-function ToggleSwitch({ enabled, onChange, disabled, color }: ToggleSwitchProps) {
+function ToggleSwitch({ enabled, onChange, disabled, color, label }: ToggleSwitchProps) {
   return (
     <button
       onClick={() => onChange(!enabled)}
+      aria-pressed={enabled}
+      aria-label={`${label} ${enabled ? "켜짐" : "꺼짐"}`}
+      aria-disabled={disabled}
       className={`relative w-9 h-5 rounded-full transition-colors ${
         enabled ? toggleColors[color] : "bg-gray-300"
       }`}

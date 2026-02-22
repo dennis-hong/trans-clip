@@ -107,6 +107,19 @@ export const PostItCard = memo(function PostItCard({ item, index, color, onCopy,
     [item, onEdit]
   );
 
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.target !== e.currentTarget) {
+        return;
+      }
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onCopy(item);
+      }
+    },
+    [item, onCopy]
+  );
+
   const formatTime = (dateStr: string) => {
     const date = new Date(dateStr);
     const now = new Date();
@@ -132,11 +145,16 @@ export const PostItCard = memo(function PostItCard({ item, index, color, onCopy,
     <div
       onClick={handleCopy}
       onDoubleClick={handleDoubleClick}
+      onKeyDown={handleKeyDown}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+      role="button"
+      tabIndex={0}
+      aria-label={`메모 ${getTitle(item.content)} 복사`}
       className={`
         relative flex-shrink-0 w-48 h-48 p-3 rounded-lg border-2 cursor-pointer
         transition-all duration-200 ease-out
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1
         ${cardColor}
         ${isHovered ? "scale-105 shadow-lg -translate-y-1" : "shadow-md"}
         ${item.isPinned ? "ring-2 ring-blue-500" : ""}
