@@ -10,13 +10,19 @@ export async function invokeWithTimeout<T>(
   args?: Record<string, unknown>,
   timeoutMs: number = DEFAULT_TIMEOUT_MS
 ): Promise<T> {
-  return Promise.race([
-    invoke<T>(cmd, args),
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`invoke("${cmd}") timed out after ${timeoutMs}ms`)),
-        timeoutMs
-      )
-    ),
-  ]);
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(
+      () => reject(new Error(`invoke("${cmd}") timed out after ${timeoutMs}ms`)),
+      timeoutMs
+    );
+  });
+
+  try {
+    return await Promise.race([invoke<T>(cmd, args), timeoutPromise]);
+  } finally {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
+  }
 }

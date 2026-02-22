@@ -100,21 +100,24 @@ pub fn get_context_description(context: &str, lang: &str) -> String {
 - 결론이 앞에 오도록 흐름 조정 (원문이 그렇지 않다면)
 - 숫자와 구체적 사실로 명확하게 전달
 - 모호한 표현 ("조금", "대략", "어느 정도")을 구체적으로 교정
-- 과도한 겸양 ("부족하지만", "미흡하나마")은 자신감 있는 표현으로 교정"#.to_string(),
+- 과도한 겸양 ("부족하지만", "미흡하나마")은 자신감 있는 표현으로 교정"#
+                .to_string(),
 
             "team-announcement" => r#"**상황**: 팀원들에게 전달하는 공지
 
 **어조 가이드**:
 - 친근하면서도 명확하게
 - 필요한 행동이나 마감일이 있다면 명확하게 드러나도록 교정
-- 장황한 배경 설명은 간결하게 축약"#.to_string(),
+- 장황한 배경 설명은 간결하게 축약"#
+                .to_string(),
 
             "peer-discussion" => r#"**상황**: 동료와 아이디어를 논의하거나 피드백을 주고받는 상황
 
 **어조 가이드**:
 - 편안하고 대화체에 가까운 톤 유지
 - 일방적 주장보다는 열린 어투로 교정
-- 지나치게 격식 있는 표현은 자연스럽게 완화"#.to_string(),
+- 지나치게 격식 있는 표현은 자연스럽게 완화"#
+                .to_string(),
 
             "external-formal" => r#"**상황**: 파트너사, 고객사 등 외부와 공식 소통
 
@@ -122,16 +125,19 @@ pub fn get_context_description(context: &str, lang: &str) -> String {
 - 격식체로 정중하게
 - 회사를 대표한다는 인식으로 전문적인 어투
 - 내부 용어, 약어가 있다면 풀어서 표현
-- 모호한 약속은 구체적으로 교정"#.to_string(),
+- 모호한 약속은 구체적으로 교정"#
+                .to_string(),
 
             "documentation" => r#"**상황**: 기술 문서, 가이드, 위키 작성
 
 **어조 가이드**:
 - 객관적이고 설명적인 톤
 - 구어체나 감정적 표현은 중립적으로 교정
-- 전문 용어의 일관성 유지"#.to_string(),
+- 전문 용어의 일관성 유지"#
+                .to_string(),
 
-            _ => "일반적인 업무 커뮤니케이션 상황입니다. 상황에 맞는 적절한 어조로 다듬어주세요.".to_string(),
+            _ => "일반적인 업무 커뮤니케이션 상황입니다. 상황에 맞는 적절한 어조로 다듬어주세요."
+                .to_string(),
         }
     } else {
         match context {
@@ -141,37 +147,43 @@ pub fn get_context_description(context: &str, lang: &str) -> String {
 - Lead with conclusions, adjust flow if needed
 - Be direct, factual, and specific
 - Replace vague qualifiers with concrete language
-- Reduce excessive hedging"#.to_string(),
+- Reduce excessive hedging"#
+                .to_string(),
 
             "team-announcement" => r#"**Context**: Team announcement
 
 **Tone Guide**:
 - Friendly yet clear
 - Ensure action items and deadlines stand out
-- Trim long-winded background"#.to_string(),
+- Trim long-winded background"#
+                .to_string(),
 
             "peer-discussion" => r#"**Context**: Discussion with colleagues
 
 **Tone Guide**:
 - Keep a casual, conversational tone
 - Soften one-sided statements into open-ended phrasing
-- Avoid overly formal language"#.to_string(),
+- Avoid overly formal language"#
+                .to_string(),
 
             "external-formal" => r#"**Context**: Formal external communication
 
 **Tone Guide**:
 - Use formal, polite, professional language
 - Expand internal jargon or abbreviations
-- Make commitments specific rather than vague"#.to_string(),
+- Make commitments specific rather than vague"#
+                .to_string(),
 
             "documentation" => r#"**Context**: Technical documentation
 
 **Tone Guide**:
 - Objective, explanatory tone
 - Neutralize colloquial or emotional expressions
-- Maintain consistent terminology"#.to_string(),
+- Maintain consistent terminology"#
+                .to_string(),
 
-            _ => "General business communication context. Polish with an appropriate tone.".to_string(),
+            _ => "General business communication context. Polish with an appropriate tone."
+                .to_string(),
         }
     }
 }
@@ -184,42 +196,50 @@ pub fn get_channel_description(channel: &str, lang: &str) -> String {
             "slack-message" => r#"**채널**: 슬랙 메시지
 - 짧고 간결하게 (2-3문장 이내가 이상적)
 - 첫 줄에 핵심이 드러나도록
-- 격식보다 효율 우선"#.to_string(),
+- 격식보다 효율 우선"#
+                .to_string(),
 
             "slack-thread" => r#"**채널**: 슬랙 스레드 답글
 - 메시지보다 약간 더 상세해도 됨
 - 원글의 맥락을 이어가는 어투
-- 간결하되 필요한 배경은 포함"#.to_string(),
+- 간결하되 필요한 배경은 포함"#
+                .to_string(),
 
             "confluence-wiki" => r#"**채널**: 컨플루언스 위키 문서
 - 완전한 문장으로 서술
 - 전문적이고 객관적인 톤
-- 독자가 맥락 없이 읽어도 이해 가능하도록"#.to_string(),
+- 독자가 맥락 없이 읽어도 이해 가능하도록"#
+                .to_string(),
 
             "jira-comment" => r#"**채널**: Jira 이슈 코멘트
 - 간결하게 (3-5줄 이내)
 - 결론과 액션 중심
-- 상태 업데이트에 적합한 직설적 어투"#.to_string(),
+- 상태 업데이트에 적합한 직설적 어투"#
+                .to_string(),
 
             "jira-description" => r#"**채널**: Jira 이슈 설명
 - 배경과 목표가 명확하게 드러나도록
 - 구체적인 요구사항이 잘 전달되도록
-- 기술적이면서 간결한 톤"#.to_string(),
+- 기술적이면서 간결한 톤"#
+                .to_string(),
 
             "email" => r#"**채널**: 업무 이메일
 - 정중하고 격식 있는 톤
 - 인사말과 마무리가 자연스럽도록
-- 요청사항과 기한이 명확하게 드러나도록"#.to_string(),
+- 요청사항과 기한이 명확하게 드러나도록"#
+                .to_string(),
 
             "pr-description" => r#"**채널**: GitHub/GitLab PR 설명
 - 변경사항의 맥락(what/why)이 명확하도록
 - 기술적이고 간결한 톤
-- 리뷰어가 빠르게 이해할 수 있도록"#.to_string(),
+- 리뷰어가 빠르게 이해할 수 있도록"#
+                .to_string(),
 
             "code-review" => r#"**채널**: 코드 리뷰 코멘트
 - 건설적이고 구체적인 톤
 - 문제점 지적 시 대안도 함께 제시하는 어투
-- 간결하게"#.to_string(),
+- 간결하게"#
+                .to_string(),
 
             _ => "일반적인 텍스트입니다. 맥락에 맞는 적절한 톤으로 다듬어주세요.".to_string(),
         }
@@ -228,42 +248,50 @@ pub fn get_channel_description(channel: &str, lang: &str) -> String {
             "slack-message" => r#"**Channel**: Slack message
 - Short and concise (2-3 sentences ideal)
 - Key point in the first line
-- Efficiency over formality"#.to_string(),
+- Efficiency over formality"#
+                .to_string(),
 
             "slack-thread" => r#"**Channel**: Slack thread reply
 - Slightly more detailed than a message
 - Continue the tone of the original post
-- Concise but include necessary context"#.to_string(),
+- Concise but include necessary context"#
+                .to_string(),
 
             "confluence-wiki" => r#"**Channel**: Confluence wiki document
 - Write in complete sentences
 - Professional, objective tone
-- Understandable without external context"#.to_string(),
+- Understandable without external context"#
+                .to_string(),
 
             "jira-comment" => r#"**Channel**: Jira issue comment
 - Brief (3-5 lines)
 - Focus on conclusions and actions
-- Direct, status-update tone"#.to_string(),
+- Direct, status-update tone"#
+                .to_string(),
 
             "jira-description" => r#"**Channel**: Jira issue description
 - Background and goals clearly stated
 - Requirements well communicated
-- Technical yet concise tone"#.to_string(),
+- Technical yet concise tone"#
+                .to_string(),
 
             "email" => r#"**Channel**: Business email
 - Polite, formal tone
 - Natural greeting and closing
-- Clear requests and deadlines"#.to_string(),
+- Clear requests and deadlines"#
+                .to_string(),
 
             "pr-description" => r#"**Channel**: GitHub/GitLab PR description
 - Clear context (what/why) of changes
 - Technical, concise tone
-- Easy for reviewers to quickly understand"#.to_string(),
+- Easy for reviewers to quickly understand"#
+                .to_string(),
 
             "code-review" => r#"**Channel**: Code review comment
 - Constructive, specific tone
 - Suggest alternatives when pointing out issues
-- Keep it brief"#.to_string(),
+- Keep it brief"#
+                .to_string(),
 
             _ => "General text. Polish with an appropriate tone for the context.".to_string(),
         }

@@ -1,3 +1,5 @@
+#![allow(unexpected_cfgs)]
+
 mod clipboard;
 mod commands;
 mod database;
@@ -21,7 +23,9 @@ pub struct AppState {
 fn show_main_window_and_emit(app: &tauri::AppHandle, event_name: &str) {
     if let Some(window) = app.get_webview_window("main") {
         hotkey::show_window_at_position(&window);
-        let _ = window.emit(event_name, ());
+        if let Err(err) = window.emit(event_name, ()) {
+            log::warn!("Failed to emit '{}' event: {}", event_name, err);
+        }
     }
 }
 
@@ -238,7 +242,11 @@ pub fn run() {
                         }
                         "feedback" => {
                             // Open GitHub issues page in default browser
-                            let _ = open::that("https://github.com/dennis-hong/trans-clip/issues");
+                            if let Err(err) =
+                                open::that("https://github.com/dennis-hong/trans-clip/issues")
+                            {
+                                log::warn!("Failed to open feedback page: {}", err);
+                            }
                         }
                         _ => {}
                     })
@@ -253,7 +261,9 @@ pub fn run() {
                             if let Some(window) = app.get_webview_window("main") {
                                 hotkey::show_window_at_position(&window);
                                 // Emit event to open history view
-                                let _ = window.emit("show_history", ());
+                                if let Err(err) = window.emit("show_history", ()) {
+                                    log::warn!("Failed to emit show_history from tray click: {}", err);
+                                }
                             }
                         }
                     })
@@ -417,7 +427,9 @@ pub fn run() {
             if label == "main" {
                 api.prevent_close();
                 if let Some(window) = app_handle.get_webview_window("main") {
-                    let _ = window.hide();
+                    if let Err(err) = window.hide() {
+                        log::warn!("Failed to hide main window on close request: {}", err);
+                    }
                 }
             }
         }

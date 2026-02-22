@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslationStream } from "@/hooks/useTranslationStream";
 import { useWindowDrag } from "@/hooks/useWindowDrag";
@@ -29,6 +29,15 @@ export function TranslationPopup({
   const [editableText, setEditableText] = useState(sourceText);
   const [isSaved, setIsSaved] = useState(false);
   const [selectedModel, setSelectedModel] = useState<ClaudeModel | undefined>(undefined);
+  const saveStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (saveStatusTimeoutRef.current) {
+        clearTimeout(saveStatusTimeoutRef.current);
+      }
+    };
+  }, []);
   // Sync editableText when sourceText changes
   useEffect(() => {
     setEditableText(sourceText);
@@ -105,7 +114,13 @@ export function TranslationPopup({
       if (newItem) {
         setIsSaved(true);
         // Reset saved state after 2 seconds
-        setTimeout(() => setIsSaved(false), 2000);
+        if (saveStatusTimeoutRef.current) {
+          clearTimeout(saveStatusTimeoutRef.current);
+        }
+        saveStatusTimeoutRef.current = setTimeout(() => {
+          setIsSaved(false);
+          saveStatusTimeoutRef.current = null;
+        }, 2000);
       }
     }
   }, [fullText, streamedText, createItem]);

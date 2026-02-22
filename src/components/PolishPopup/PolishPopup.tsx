@@ -32,6 +32,15 @@ export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupPro
   const [isSaved, setIsSaved] = useState(false);
   const isInitialMount = useRef(true);
   const [selectedModel, setSelectedModel] = useState<ClaudeModel | undefined>(undefined);
+  const saveStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (saveStatusTimeoutRef.current) {
+        clearTimeout(saveStatusTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Sync editableText when sourceText changes
   useEffect(() => {
@@ -123,7 +132,13 @@ export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupPro
       if (newItem) {
         setIsSaved(true);
         // Reset saved state after 2 seconds
-        setTimeout(() => setIsSaved(false), 2000);
+        if (saveStatusTimeoutRef.current) {
+          clearTimeout(saveStatusTimeoutRef.current);
+        }
+        saveStatusTimeoutRef.current = setTimeout(() => {
+          setIsSaved(false);
+          saveStatusTimeoutRef.current = null;
+        }, 2000);
       }
     }
   }, [fullText, streamedText, createItem]);

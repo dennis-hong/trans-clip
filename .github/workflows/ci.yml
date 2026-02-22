@@ -56,8 +56,7 @@ jobs:
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets
 
-      - name: Rust formatting (advisory)
-        continue-on-error: true
+      - name: Rust formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all --check
 
       - name: Rust clippy

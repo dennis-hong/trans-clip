@@ -54,14 +54,20 @@ pub fn show_window_at_position(window: &tauri::WebviewWindow) {
             let x = mon_pos.x + (mon_logical_width - win_width) / 2;
             let y = mon_pos.y + mon_logical_height - win_height;
 
-            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+            if let Err(err) = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
                 width: win_width as f64,
                 height: win_height as f64,
-            }));
-            let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition {
-                x: x as f64,
-                y: y as f64,
-            }));
+            })) {
+                log::warn!("Failed to set window size before showing: {}", err);
+            }
+            if let Err(err) =
+                window.set_position(tauri::Position::Logical(tauri::LogicalPosition {
+                    x: x as f64,
+                    y: y as f64,
+                }))
+            {
+                log::warn!("Failed to set window position before showing: {}", err);
+            }
 
             log::info!(
                 "Window positioned at ({}, {}), size {}x{} before showing",
@@ -73,8 +79,12 @@ pub fn show_window_at_position(window: &tauri::WebviewWindow) {
         }
     }
 
-    let _ = window.show();
-    let _ = window.set_focus();
+    if let Err(err) = window.show() {
+        log::warn!("Failed to show window: {}", err);
+    }
+    if let Err(err) = window.set_focus() {
+        log::warn!("Failed to focus window: {}", err);
+    }
 
     log::info!("Window shown and focused");
 }
@@ -390,7 +400,9 @@ mod macos {
                 if let Ok(is_visible) = window.is_visible() {
                     if is_visible {
                         log::info!("Window is visible, hiding it (toggle)");
-                        let _ = window.hide();
+                        if let Err(err) = window.hide() {
+                            log::warn!("Failed to hide window during toggle: {}", err);
+                        }
                         return;
                     }
                 }

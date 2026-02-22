@@ -86,4 +86,78 @@ describe("usePolishStream", () => {
     expect(result.current.streamedText).toBe("");
     expect(result.current.isStreaming).toBe(false);
   });
+
+  it("clears active stream handlers when clearResult is called", async () => {
+    let activeChannel:
+      | {
+          onmessage?: (event: {
+            event: string;
+            data: Record<string, unknown>;
+          }) => void;
+        }
+      | null = null;
+
+    invokeWithTimeoutMock.mockImplementation(async (_cmd: string, args: Record<string, unknown>) => {
+      activeChannel = args.onEvent as {
+        onmessage?: (event: {
+          event: string;
+          data: Record<string, unknown>;
+        }) => void;
+      };
+      return undefined;
+    });
+
+    const { result } = renderHook(() => usePolishStream());
+
+    await act(async () => {
+      await result.current.polish("draft", "peer-discussion", "slack-message", []);
+    });
+
+    act(() => {
+      result.current.clearResult();
+    });
+
+    act(() => {
+      activeChannel?.onmessage?.({ event: "delta", data: { text: "late" } });
+    });
+
+    expect(result.current.streamedText).toBe("");
+    expect(result.current.fullText).toBe("");
+    expect(result.current.isStreaming).toBe(false);
+  });
+
+  it("detaches stream handlers when invoke throws", async () => {
+    let activeChannel:
+      | {
+          onmessage?: (event: {
+            event: string;
+            data: Record<string, unknown>;
+          }) => void;
+        }
+      | null = null;
+
+    invokeWithTimeoutMock.mockImplementation(async (_cmd: string, args: Record<string, unknown>) => {
+      activeChannel = args.onEvent as {
+        onmessage?: (event: {
+          event: string;
+          data: Record<string, unknown>;
+        }) => void;
+      };
+      throw new Error("invoke timeout");
+    });
+
+    const { result } = renderHook(() => usePolishStream());
+
+    await act(async () => {
+      await result.current.polish("draft", "peer-discussion", "slack-message", []);
+    });
+
+    act(() => {
+      activeChannel?.onmessage?.({ event: "delta", data: { text: "late" } });
+    });
+
+    expect(result.current.error).toBe("invoke timeout");
+    expect(result.current.streamedText).toBe("");
+    expect(result.current.isStreaming).toBe(false);
+  });
 });

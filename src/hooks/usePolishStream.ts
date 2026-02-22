@@ -47,14 +47,18 @@ export function usePolishStream(): UsePolishStreamReturn {
     activeChannelRef.current = null;
   }, []);
 
+  const invalidateActiveRequest = useCallback(() => {
+    requestIdRef.current += 1;
+    isPolishingRef.current = false;
+    detachActiveChannel();
+  }, [detachActiveChannel]);
+
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
-      requestIdRef.current += 1;
-      isPolishingRef.current = false;
-      detachActiveChannel();
+      invalidateActiveRequest();
     };
-  }, [detachActiveChannel]);
+  }, [invalidateActiveRequest]);
 
   const polish = useCallback(
     async (
@@ -142,6 +146,9 @@ export function usePolishStream(): UsePolishStreamReturn {
         const message = err instanceof Error ? err.message : String(err);
         setError(message);
         setIsStreaming(false);
+        if (requestId === requestIdRef.current) {
+          detachActiveChannel();
+        }
       } finally {
         if (requestId === requestIdRef.current) {
           isPolishingRef.current = false;
@@ -152,12 +159,14 @@ export function usePolishStream(): UsePolishStreamReturn {
   );
 
   const clearResult = useCallback(() => {
+    invalidateActiveRequest();
+    setIsStreaming(false);
     setStreamedText("");
     setFullText("");
     setError(null);
     setTokenUsage(null);
     setDetectedLanguage(null);
-  }, []);
+  }, [invalidateActiveRequest]);
 
   return {
     polish,

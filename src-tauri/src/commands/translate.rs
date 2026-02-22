@@ -1,11 +1,22 @@
 use crate::database::TranslationRow;
 use crate::keychain;
-use crate::utils::streaming::{anthropic_http_client, stream_anthropic_sse};
+use crate::utils::streaming::{
+    anthropic_http_client, extract_anthropic_message_text, stream_anthropic_sse,
+};
 use crate::AppState;
 use tauri::ipc::Channel;
 use tauri::State;
 
 use super::types::{TokenUsage, TranslateError, TranslateResponse, TranslateStreamEvent};
+
+fn emit_translate_stream_event(
+    on_event: &Channel<TranslateStreamEvent>,
+    event: TranslateStreamEvent,
+) {
+    if let Err(err) = on_event.send(event) {
+        log::warn!("Failed to send translate stream event: {}", err);
+    }
+}
 
 #[tauri::command]
 pub async fn get_cached_translation(
@@ -241,10 +252,23 @@ pub async fn translate(
             if res.status().is_success() {
                 let body: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
 
-                let translated_text = body["content"][0]["text"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string();
+                let translated_text = match extract_anthropic_message_text(&body) {
+                    Ok(text) => text,
+                    Err(parse_err) => {
+                        return Ok(TranslateResponse {
+                            success: false,
+                            translated_text: None,
+                            detected_language: None,
+                            from_cache: false,
+                            glossary_applied: vec![],
+                            token_usage: None,
+                            error: Some(TranslateError {
+                                code: "API_ERROR".to_string(),
+                                message: format!("Invalid API response: {}", parse_err),
+                            }),
+                        });
+                    }
+                };
 
                 let input_tokens = body["usage"]["input_tokens"].as_i64().map(|v| v as i32);
                 let output_tokens = body["usage"]["output_tokens"].as_i64().map(|v| v as i32);
@@ -277,11 +301,15 @@ pub async fn translate(
                 };
 
                 let db = &state.db;
-                let _ = db.insert_translation(&translation).await;
+                if let Err(err) = db.insert_translation(&translation).await {
+                    log::warn!("Failed to cache translation (non-streaming): {}", err);
+                }
 
                 // Update glossary usage counts
                 if !glossary_ids.is_empty() {
-                    let _ = db.increment_glossary_usage(&glossary_ids).await;
+                    if let Err(err) = db.increment_glossary_usage(&glossary_ids).await {
+                        log::warn!("Failed to update glossary usage (non-streaming): {}", err);
+                    }
                 }
 
                 Ok(TranslateResponse {
@@ -353,18 +381,24 @@ pub async fn translate_stream(
 ) -> Result<(), String> {
     // Validation
     if text.is_empty() {
-        let _ = on_event.send(TranslateStreamEvent::Error {
-            code: "EMPTY_TEXT".to_string(),
-            message: "Text cannot be empty".to_string(),
-        });
+        emit_translate_stream_event(
+            &on_event,
+            TranslateStreamEvent::Error {
+                code: "EMPTY_TEXT".to_string(),
+                message: "Text cannot be empty".to_string(),
+            },
+        );
         return Ok(());
     }
 
     if text.len() > 10000 {
-        let _ = on_event.send(TranslateStreamEvent::Error {
-            code: "TEXT_TOO_LONG".to_string(),
-            message: "Text exceeds maximum length of 10000 characters".to_string(),
-        });
+        emit_translate_stream_event(
+            &on_event,
+            TranslateStreamEvent::Error {
+                code: "TEXT_TOO_LONG".to_string(),
+                message: "Text exceeds maximum length of 10000 characters".to_string(),
+            },
+        );
         return Ok(());
     }
 
@@ -375,11 +409,14 @@ pub async fn translate_stream(
     let api_key = match keychain::resolve_api_key(&settings.api_key) {
         Some(key) => key,
         _ => {
-            let _ = on_event.send(TranslateStreamEvent::Error {
-                code: "INVALID_API_KEY".to_string(),
-                message: "API key not configured. Please set your Claude API key in Settings."
-                    .to_string(),
-            });
+            emit_translate_stream_event(
+                &on_event,
+                TranslateStreamEvent::Error {
+                    code: "INVALID_API_KEY".to_string(),
+                    message: "API key not configured. Please set your Claude API key in Settings."
+                        .to_string(),
+                },
+            );
             return Ok(());
         }
     };
@@ -410,22 +447,28 @@ pub async fn translate_stream(
 
             let cached_text = cached.translated_text;
 
-            let _ = on_event.send(TranslateStreamEvent::Started {
-                detected_language: Some(src_lang.clone()),
-                from_cache: true,
-                glossary_applied: glossary_applied.clone(),
-            });
-
-            let _ = on_event.send(TranslateStreamEvent::Completed {
-                full_text: cached_text.clone(),
-                token_usage: match (cached.input_tokens, cached.output_tokens) {
-                    (Some(i), Some(o)) => Some(TokenUsage {
-                        input_tokens: i,
-                        output_tokens: o,
-                    }),
-                    _ => None,
+            emit_translate_stream_event(
+                &on_event,
+                TranslateStreamEvent::Started {
+                    detected_language: Some(src_lang.clone()),
+                    from_cache: true,
+                    glossary_applied: glossary_applied.clone(),
                 },
-            });
+            );
+
+            emit_translate_stream_event(
+                &on_event,
+                TranslateStreamEvent::Completed {
+                    full_text: cached_text.clone(),
+                    token_usage: match (cached.input_tokens, cached.output_tokens) {
+                        (Some(i), Some(o)) => Some(TokenUsage {
+                            input_tokens: i,
+                            output_tokens: o,
+                        }),
+                        _ => None,
+                    },
+                },
+            );
 
             return Ok(());
         }
@@ -451,11 +494,14 @@ pub async fn translate_stream(
     let glossary_ids: Vec<String> = glossary_matches.iter().map(|g| g.id.clone()).collect();
 
     // Send Started event
-    let _ = on_event.send(TranslateStreamEvent::Started {
-        detected_language: Some(src_lang.clone()),
-        from_cache: false,
-        glossary_applied: glossary_ids.clone(),
-    });
+    emit_translate_stream_event(
+        &on_event,
+        TranslateStreamEvent::Started {
+            detected_language: Some(src_lang.clone()),
+            from_cache: false,
+            glossary_applied: glossary_ids.clone(),
+        },
+    );
 
     // Use provided model or fall back to settings
     let use_model = model.unwrap_or_else(|| settings.preferred_model.clone());
@@ -488,35 +534,47 @@ pub async fn translate_stream(
     match response {
         Ok(res) => {
             if res.status().as_u16() == 401 {
-                let _ = on_event.send(TranslateStreamEvent::Error {
-                    code: "INVALID_API_KEY".to_string(),
-                    message: "Invalid API key".to_string(),
-                });
+                emit_translate_stream_event(
+                    &on_event,
+                    TranslateStreamEvent::Error {
+                        code: "INVALID_API_KEY".to_string(),
+                        message: "Invalid API key".to_string(),
+                    },
+                );
                 return Ok(());
             }
 
             if !res.status().is_success() {
-                let _ = on_event.send(TranslateStreamEvent::Error {
-                    code: "API_ERROR".to_string(),
-                    message: format!("API error: {}", res.status()),
-                });
+                emit_translate_stream_event(
+                    &on_event,
+                    TranslateStreamEvent::Error {
+                        code: "API_ERROR".to_string(),
+                        message: format!("API error: {}", res.status()),
+                    },
+                );
                 return Ok(());
             }
 
             let stream_result = stream_anthropic_sse(res, |delta| {
-                let _ = on_event.send(TranslateStreamEvent::Delta {
-                    text: delta.to_string(),
-                });
+                emit_translate_stream_event(
+                    &on_event,
+                    TranslateStreamEvent::Delta {
+                        text: delta.to_string(),
+                    },
+                );
             })
             .await;
 
             let (full_text, input_tokens, output_tokens) = match stream_result {
                 Ok(result) => (result.full_text, result.input_tokens, result.output_tokens),
                 Err(err) => {
-                    let _ = on_event.send(TranslateStreamEvent::Error {
-                        code: "STREAM_ERROR".to_string(),
-                        message: err,
-                    });
+                    emit_translate_stream_event(
+                        &on_event,
+                        TranslateStreamEvent::Error {
+                            code: "STREAM_ERROR".to_string(),
+                            message: err,
+                        },
+                    );
                     return Ok(());
                 }
             };
@@ -546,30 +604,40 @@ pub async fn translate_stream(
                 output_tokens,
             };
 
-            let _ = db.insert_translation(&translation).await;
+            if let Err(err) = db.insert_translation(&translation).await {
+                log::warn!("Failed to cache translation (streaming): {}", err);
+            }
 
             // Update glossary usage counts
             if !glossary_ids.is_empty() {
-                let _ = db.increment_glossary_usage(&glossary_ids).await;
+                if let Err(err) = db.increment_glossary_usage(&glossary_ids).await {
+                    log::warn!("Failed to update glossary usage (streaming): {}", err);
+                }
             }
 
             // Send Completed event
-            let _ = on_event.send(TranslateStreamEvent::Completed {
-                full_text: full_text.clone(),
-                token_usage: match (input_tokens, output_tokens) {
-                    (Some(i), Some(o)) => Some(TokenUsage {
-                        input_tokens: i,
-                        output_tokens: o,
-                    }),
-                    _ => None,
+            emit_translate_stream_event(
+                &on_event,
+                TranslateStreamEvent::Completed {
+                    full_text: full_text.clone(),
+                    token_usage: match (input_tokens, output_tokens) {
+                        (Some(i), Some(o)) => Some(TokenUsage {
+                            input_tokens: i,
+                            output_tokens: o,
+                        }),
+                        _ => None,
+                    },
                 },
-            });
+            );
         }
         Err(e) => {
-            let _ = on_event.send(TranslateStreamEvent::Error {
-                code: "NETWORK_ERROR".to_string(),
-                message: format!("Network error: {}", e),
-            });
+            emit_translate_stream_event(
+                &on_event,
+                TranslateStreamEvent::Error {
+                    code: "NETWORK_ERROR".to_string(),
+                    message: format!("Network error: {}", e),
+                },
+            );
         }
     }
 

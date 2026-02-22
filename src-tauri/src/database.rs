@@ -5,6 +5,15 @@ pub struct Database {
     pub pool: Pool<Sqlite>,
 }
 
+fn is_duplicate_column_error(err: &sqlx::Error, column_name: &str) -> bool {
+    match err {
+        sqlx::Error::Database(db_err) => db_err
+            .message()
+            .contains(&format!("duplicate column name: {}", column_name)),
+        _ => false,
+    }
+}
+
 impl Database {
     pub async fn new(path: &Path) -> Result<Self, sqlx::Error> {
         let db_url = format!("sqlite:{}?mode=rwc", path.display());
@@ -61,7 +70,10 @@ impl Database {
 
         if table_exists.is_some() {
             // Table exists - check if it needs migration
-            let _ = self.migrate_glossary_schema().await;
+            if let Err(err) = self.migrate_glossary_schema().await {
+                log::error!("Failed to migrate glossary schema: {}", err);
+                return Err(err);
+            }
         }
 
         // Create glossary_entries table (keyword + description format for LLM context)
@@ -136,21 +148,42 @@ impl Database {
         .await?;
 
         // Migration: add api_key column if it doesn't exist (for existing databases)
-        let _ = sqlx::query("ALTER TABLE user_settings ADD COLUMN api_key TEXT")
+        match sqlx::query("ALTER TABLE user_settings ADD COLUMN api_key TEXT")
             .execute(&self.pool)
-            .await;
+            .await
+        {
+            Ok(_) => {}
+            Err(err) if is_duplicate_column_error(&err, "api_key") => {
+                log::debug!("Skipping api_key migration: column already exists");
+            }
+            Err(err) => return Err(err),
+        }
 
         // Migration: add paste_delay_ms column if it doesn't exist
-        let _ = sqlx::query(
+        match sqlx::query(
             "ALTER TABLE user_settings ADD COLUMN paste_delay_ms INTEGER NOT NULL DEFAULT 150",
         )
         .execute(&self.pool)
-        .await;
+        .await
+        {
+            Ok(_) => {}
+            Err(err) if is_duplicate_column_error(&err, "paste_delay_ms") => {
+                log::debug!("Skipping paste_delay_ms migration: column already exists");
+            }
+            Err(err) => return Err(err),
+        }
 
         // Migration: add updated_at column to clipboard_items if it doesn't exist
-        let _ = sqlx::query("ALTER TABLE clipboard_items ADD COLUMN updated_at DATETIME")
+        match sqlx::query("ALTER TABLE clipboard_items ADD COLUMN updated_at DATETIME")
             .execute(&self.pool)
-            .await;
+            .await
+        {
+            Ok(_) => {}
+            Err(err) if is_duplicate_column_error(&err, "updated_at") => {
+                log::debug!("Skipping updated_at migration: column already exists");
+            }
+            Err(err) => return Err(err),
+        }
 
         // Create monitor_window_sizes table for per-monitor adaptive window sizing
         sqlx::query(

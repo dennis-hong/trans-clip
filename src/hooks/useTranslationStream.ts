@@ -53,14 +53,18 @@ export function useTranslationStream(
     activeChannelRef.current = null;
   }, []);
 
+  const invalidateActiveRequest = useCallback(() => {
+    requestIdRef.current += 1;
+    isTranslatingRef.current = false;
+    detachActiveChannel();
+  }, [detachActiveChannel]);
+
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
-      requestIdRef.current += 1;
-      isTranslatingRef.current = false;
-      detachActiveChannel();
+      invalidateActiveRequest();
     };
-  }, [detachActiveChannel]);
+  }, [invalidateActiveRequest]);
 
   const translate = useCallback(
     async (text: string, model?: string): Promise<void> => {
@@ -180,6 +184,9 @@ export function useTranslationStream(
         const message = err instanceof Error ? err.message : String(err);
         setError(message);
         setIsStreaming(false);
+        if (requestId === requestIdRef.current) {
+          detachActiveChannel();
+        }
       } finally {
         if (requestId === requestIdRef.current) {
           isTranslatingRef.current = false;
@@ -190,6 +197,8 @@ export function useTranslationStream(
   );
 
   const clearResult = useCallback(() => {
+    invalidateActiveRequest();
+    setIsStreaming(false);
     setStreamedText("");
     setFullText("");
     setError(null);
@@ -197,7 +206,7 @@ export function useTranslationStream(
     setGlossaryApplied([]);
     setTokenUsage(null);
     setDetectedLanguage(null);
-  }, []);
+  }, [invalidateActiveRequest]);
 
   return {
     translate,

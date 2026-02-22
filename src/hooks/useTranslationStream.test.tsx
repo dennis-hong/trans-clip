@@ -119,4 +119,89 @@ describe("useTranslationStream", () => {
     resolveStream?.();
     await firstPromise;
   });
+
+  it("clears active stream handlers when clearResult is called", async () => {
+    let activeChannel:
+      | {
+          onmessage?: (event: {
+            event: string;
+            data: Record<string, unknown>;
+          }) => void;
+        }
+      | null = null;
+
+    invokeWithTimeoutMock.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
+      if (cmd === "get_cached_translation") {
+        return null;
+      }
+      if (cmd === "translate_stream") {
+        activeChannel = args.onEvent as {
+          onmessage?: (event: {
+            event: string;
+            data: Record<string, unknown>;
+          }) => void;
+        };
+      }
+      return undefined;
+    });
+
+    const { result } = renderHook(() => useTranslationStream());
+
+    await act(async () => {
+      await result.current.translate("hello");
+    });
+
+    act(() => {
+      result.current.clearResult();
+    });
+
+    act(() => {
+      activeChannel?.onmessage?.({ event: "delta", data: { text: "late" } });
+    });
+
+    expect(result.current.streamedText).toBe("");
+    expect(result.current.fullText).toBe("");
+    expect(result.current.isStreaming).toBe(false);
+  });
+
+  it("detaches stream handlers when invoke throws", async () => {
+    let activeChannel:
+      | {
+          onmessage?: (event: {
+            event: string;
+            data: Record<string, unknown>;
+          }) => void;
+        }
+      | null = null;
+
+    invokeWithTimeoutMock.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
+      if (cmd === "get_cached_translation") {
+        return null;
+      }
+      if (cmd === "translate_stream") {
+        activeChannel = args.onEvent as {
+          onmessage?: (event: {
+            event: string;
+            data: Record<string, unknown>;
+          }) => void;
+        };
+        throw new Error("invoke timeout");
+      }
+      return undefined;
+    });
+
+    const { result } = renderHook(() => useTranslationStream());
+
+    await act(async () => {
+      await result.current.translate("hello");
+    });
+
+    act(() => {
+      activeChannel?.onmessage?.({ event: "delta", data: { text: "late" } });
+    });
+
+    expect(result.current.error).toBe("invoke timeout");
+    expect(result.current.streamedText).toBe("");
+    expect(result.current.isStreaming).toBe(false);
+  });
 });

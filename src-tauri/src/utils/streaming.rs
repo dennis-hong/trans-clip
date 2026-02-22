@@ -8,6 +8,23 @@ pub struct AnthropicStreamResult {
     pub output_tokens: Option<i32>,
 }
 
+pub fn extract_anthropic_message_text(body: &serde_json::Value) -> Result<String, String> {
+    let content = body
+        .get("content")
+        .and_then(|value| value.as_array())
+        .ok_or_else(|| "missing content array".to_string())?;
+
+    let first_block = content
+        .first()
+        .ok_or_else(|| "content array is empty".to_string())?;
+
+    first_block
+        .get("text")
+        .and_then(|value| value.as_str())
+        .map(ToString::to_string)
+        .ok_or_else(|| "missing content[0].text string".to_string())
+}
+
 pub fn anthropic_http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
@@ -111,4 +128,39 @@ pub async fn stream_anthropic_sse(
         input_tokens,
         output_tokens,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_anthropic_message_text;
+
+    #[test]
+    fn extracts_text_from_valid_message_body() {
+        let body = serde_json::json!({
+            "content": [
+                { "type": "text", "text": "hello" }
+            ]
+        });
+
+        let text = extract_anthropic_message_text(&body).expect("text should parse");
+        assert_eq!(text, "hello");
+    }
+
+    #[test]
+    fn returns_error_when_content_array_is_missing() {
+        let body = serde_json::json!({ "foo": "bar" });
+        let err = extract_anthropic_message_text(&body).expect_err("should fail");
+        assert!(err.contains("missing content array"));
+    }
+
+    #[test]
+    fn returns_error_when_text_is_missing() {
+        let body = serde_json::json!({
+            "content": [
+                { "type": "text" }
+            ]
+        });
+        let err = extract_anthropic_message_text(&body).expect_err("should fail");
+        assert!(err.contains("missing content[0].text string"));
+    }
 }

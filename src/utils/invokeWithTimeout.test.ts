@@ -35,4 +35,14 @@ describe("invokeWithTimeout", () => {
     await vi.advanceTimersByTimeAsync(26);
     await assertion;
   });
+
+  it("clears timeout timer after invoke resolves", async () => {
+    vi.useFakeTimers();
+    invokeMock.mockResolvedValue("ok");
+
+    const pending = invokeWithTimeout("fast_cmd", undefined, 1000);
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(pending).resolves.toBe("ok");
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });

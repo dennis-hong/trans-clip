@@ -93,6 +93,21 @@ export function DrawerPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastSavedWidthRef = useRef<number>(0);
   const resizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingTimeoutsRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+
+  const scheduleTimeout = useCallback((callback: () => void | Promise<void>, delayMs: number) => {
+    const timeoutId = setTimeout(() => {
+      pendingTimeoutsRef.current.delete(timeoutId);
+      void callback();
+    }, delayMs);
+    pendingTimeoutsRef.current.add(timeoutId);
+    return timeoutId;
+  }, []);
+
+  const clearPendingTimeouts = useCallback(() => {
+    pendingTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+    pendingTimeoutsRef.current.clear();
+  }, []);
 
   const { items, isLoading, fetchHistory, deleteItem, togglePin } = useClipboardStore();
 
@@ -118,6 +133,12 @@ export function DrawerPanel({
     };
     initWidth();
   }, [fetchHistory]);
+
+  useEffect(() => {
+    return () => {
+      clearPendingTimeouts();
+    };
+  }, [clearPendingTimeouts]);
 
   // Listen for postit_saved event from editor window
   useEffect(() => {
@@ -234,7 +255,7 @@ export function DrawerPanel({
             setCurrentMonitor(monitorIndex);
             
             // Update lastSavedWidthRef with the new window width after monitor change
-            setTimeout(async () => {
+            scheduleTimeout(async () => {
               try {
                 const win = getCurrentWindow();
                 const size = await win.outerSize();
@@ -313,7 +334,7 @@ export function DrawerPanel({
               setToast({ message: "클립보드에 복사됨!", type: "success" });
               // In stealth mode, close after copying
               if (isStealthMode && onClose) {
-                setTimeout(() => onClose(), 300);
+                scheduleTimeout(() => onClose(), 300);
               }
             }).catch((err) => {
               console.error("Failed to copy:", err);
@@ -326,7 +347,7 @@ export function DrawerPanel({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [monitors.length, currentView, isStealthMode, onClose, onTranslate, onPolish, handleCreateNewItem]);
+  }, [monitors.length, currentView, isStealthMode, onClose, onTranslate, onPolish, handleCreateNewItem, scheduleTimeout]);
 
   const loadMonitors = async () => {
     try {
@@ -348,7 +369,7 @@ export function DrawerPanel({
       await invoke("set_drawer_mode", { mode });
       
       // Update lastSavedWidthRef after mode change (width might have changed)
-      setTimeout(async () => {
+      scheduleTimeout(async () => {
         try {
           const window = getCurrentWindow();
           const size = await window.outerSize();
@@ -361,7 +382,7 @@ export function DrawerPanel({
     } catch (err) {
       console.error("Failed to set drawer mode:", err);
     }
-  }, []);
+  }, [scheduleTimeout]);
 
   const handleSearch = useCallback(
     (query: string) => {
@@ -377,13 +398,13 @@ export function DrawerPanel({
       setToast({ message: "클립보드에 복사됨!", type: "success" });
       // In stealth mode, close after copying
       if (isStealthMode && onClose) {
-        setTimeout(() => onClose(), 300);
+        scheduleTimeout(() => onClose(), 300);
       }
     } catch (err) {
       console.error("Failed to copy:", err);
       setToast({ message: "복사 실패", type: "error" });
     }
-  }, [isStealthMode, onClose]);
+  }, [isStealthMode, onClose, scheduleTimeout]);
 
   const handlePaste = useCallback(async (item: ClipboardItem) => {
     try {
@@ -394,7 +415,7 @@ export function DrawerPanel({
         setToast({ message: "붙여넣기 완료!", type: "success" });
         // In stealth mode, close after pasting
         if (isStealthMode && onClose) {
-          setTimeout(() => onClose(), 100);
+          scheduleTimeout(() => onClose(), 100);
         }
       } else {
         setToast({
@@ -406,7 +427,7 @@ export function DrawerPanel({
       console.error("Failed to paste:", err);
       setToast({ message: "붙여넣기 실패", type: "error" });
     }
-  }, [isStealthMode, onClose]);
+  }, [isStealthMode, onClose, scheduleTimeout]);
 
   const handleDelete = useCallback(
     async (id: string) => {
@@ -452,7 +473,7 @@ export function DrawerPanel({
       setCurrentMonitor(index);
       
       // Update lastSavedWidthRef with the new window width after monitor change
-      setTimeout(async () => {
+      scheduleTimeout(async () => {
         try {
           const window = getCurrentWindow();
           const size = await window.outerSize();

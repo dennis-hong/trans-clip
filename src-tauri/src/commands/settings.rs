@@ -60,10 +60,7 @@ pub async fn update_settings(
             };
 
             if let Err(err) = result {
-                return Err(format!(
-                    "Failed to apply launch-at-login setting: {}",
-                    err
-                ));
+                return Err(format!("Failed to apply launch-at-login setting: {}", err));
             }
         }
 
