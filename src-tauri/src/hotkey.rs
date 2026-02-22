@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -7,6 +7,10 @@ static LAST_CMD_D_TIME: AtomicU64 = AtomicU64::new(0);
 static HOTKEY_ENABLED: AtomicBool = AtomicBool::new(false);
 static DOUBLE_PRESS_INTERVAL_MS: AtomicU64 = AtomicU64::new(500);
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
+#[cfg(target_os = "macos")]
+static EVENT_TAP_PTR: AtomicUsize = AtomicUsize::new(0);
+#[cfg(target_os = "macos")]
+static EVENT_RUN_LOOP_PTR: AtomicUsize = AtomicUsize::new(0);
 
 const DEFAULT_DOUBLE_PRESS_INTERVAL_MS: u64 = 500;
 
@@ -145,6 +149,7 @@ mod macos {
         fn CFRunLoopAddSource(run_loop: *mut c_void, source: *mut c_void, mode: *const c_void);
         fn CFRunLoopGetCurrent() -> *mut c_void;
         fn CFRunLoopRun();
+        fn CFRunLoopStop(run_loop: *mut c_void);
         fn CGEventTapEnable(tap: *mut c_void, enable: bool);
     }
 
@@ -168,6 +173,24 @@ mod macos {
 
         log::info!("Hotkey event tap started (interval: {}ms)", interval_ms);
         Ok(())
+    }
+
+    pub fn stop_event_tap() {
+        HOTKEY_ENABLED.store(false, Ordering::SeqCst);
+
+        let tap_ptr = EVENT_TAP_PTR.swap(0, Ordering::SeqCst) as *mut c_void;
+        if !tap_ptr.is_null() {
+            unsafe {
+                CGEventTapEnable(tap_ptr, false);
+            }
+        }
+
+        let run_loop_ptr = EVENT_RUN_LOOP_PTR.swap(0, Ordering::SeqCst) as *mut c_void;
+        if !run_loop_ptr.is_null() {
+            unsafe {
+                CFRunLoopStop(run_loop_ptr);
+            }
+        }
     }
 
     extern "C" fn event_callback(
@@ -290,16 +313,21 @@ mod macos {
                 log::error!(
                     "Failed to create CGEventTap. Accessibility permission may be required."
                 );
+                HOTKEY_ENABLED.store(false, Ordering::SeqCst);
                 return;
             }
 
             let source = CFMachPortCreateRunLoopSource(std::ptr::null(), tap, 0);
             if source.is_null() {
                 log::error!("Failed to create run loop source");
+                CGEventTapEnable(tap, false);
+                HOTKEY_ENABLED.store(false, Ordering::SeqCst);
                 return;
             }
 
             let run_loop = CFRunLoopGetCurrent();
+            EVENT_TAP_PTR.store(tap as usize, Ordering::SeqCst);
+            EVENT_RUN_LOOP_PTR.store(run_loop as usize, Ordering::SeqCst);
 
             // kCFRunLoopCommonModes
             #[link(name = "CoreFoundation", kind = "framework")]
@@ -312,6 +340,11 @@ mod macos {
 
             log::info!("CGEventTap is running");
             CFRunLoopRun();
+
+            EVENT_TAP_PTR.store(0, Ordering::SeqCst);
+            EVENT_RUN_LOOP_PTR.store(0, Ordering::SeqCst);
+            HOTKEY_ENABLED.store(false, Ordering::SeqCst);
+            log::info!("CGEventTap stopped");
         }
     }
 
@@ -498,6 +531,16 @@ impl HotkeyManager {
         log::warn!("Hotkey monitoring is only supported on macOS");
         Ok(())
     }
+}
+
+#[cfg(target_os = "macos")]
+pub fn stop_hotkey_monitor() {
+    macos::stop_event_tap();
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn stop_hotkey_monitor() {
+    HOTKEY_ENABLED.store(false, Ordering::SeqCst);
 }
 
 // ============================================

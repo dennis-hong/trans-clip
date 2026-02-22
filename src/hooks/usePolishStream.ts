@@ -1,7 +1,9 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { invokeWithTimeout } from "@/utils/invokeWithTimeout";
 import type { PolishStreamEvent, PolishContext, PolishChannel, PolishOption, Language } from "@/types";
+
+const NOOP_POLISH_HANDLER = () => {};
 
 interface UsePolishStreamReturn {
   polish: (
@@ -32,6 +34,27 @@ export function usePolishStream(): UsePolishStreamReturn {
   const accumulatedTextRef = useRef("");
   // Ref to prevent concurrent polish calls
   const isPolishingRef = useRef(false);
+  // Refs for lifecycle safety and stale-event guards
+  const activeChannelRef = useRef<Channel<PolishStreamEvent> | null>(null);
+  const requestIdRef = useRef(0);
+  const isMountedRef = useRef(true);
+
+  const detachActiveChannel = useCallback(() => {
+    if (!activeChannelRef.current) {
+      return;
+    }
+    activeChannelRef.current.onmessage = NOOP_POLISH_HANDLER;
+    activeChannelRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      requestIdRef.current += 1;
+      isPolishingRef.current = false;
+      detachActiveChannel();
+    };
+  }, [detachActiveChannel]);
 
   const polish = useCallback(
     async (
@@ -46,6 +69,9 @@ export function usePolishStream(): UsePolishStreamReturn {
         return;
       }
       isPolishingRef.current = true;
+      const requestId = ++requestIdRef.current;
+      const isStaleRequest = () => !isMountedRef.current || requestId !== requestIdRef.current;
+      detachActiveChannel();
 
       setIsStreaming(true);
       setStreamedText("");
@@ -57,8 +83,13 @@ export function usePolishStream(): UsePolishStreamReturn {
 
       try {
         const channel = new Channel<PolishStreamEvent>();
+        activeChannelRef.current = channel;
 
         channel.onmessage = (event: PolishStreamEvent) => {
+          if (isStaleRequest()) {
+            return;
+          }
+
           switch (event.event) {
             case "started":
               setDetectedLanguage(event.data.detectedLanguage);
@@ -75,6 +106,9 @@ export function usePolishStream(): UsePolishStreamReturn {
               setStreamedText(finalText);
               setTokenUsage(event.data.tokenUsage);
               setIsStreaming(false);
+              if (activeChannelRef.current === channel) {
+                detachActiveChannel();
+              }
               break;
             }
             case "error":
@@ -82,6 +116,9 @@ export function usePolishStream(): UsePolishStreamReturn {
               setStreamedText("");
               setFullText("");
               setIsStreaming(false);
+              if (activeChannelRef.current === channel) {
+                detachActiveChannel();
+              }
               break;
           }
         };
@@ -94,15 +131,24 @@ export function usePolishStream(): UsePolishStreamReturn {
           model,
           onEvent: channel,
         });
+
+        if (isStaleRequest()) {
+          return;
+        }
       } catch (err) {
+        if (isStaleRequest()) {
+          return;
+        }
         const message = err instanceof Error ? err.message : String(err);
         setError(message);
         setIsStreaming(false);
       } finally {
-        isPolishingRef.current = false;
+        if (requestId === requestIdRef.current) {
+          isPolishingRef.current = false;
+        }
       }
     },
-    []
+    [detachActiveChannel]
   );
 
   const clearResult = useCallback(() => {

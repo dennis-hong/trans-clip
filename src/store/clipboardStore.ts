@@ -8,6 +8,8 @@ import type {
   ClearHistoryResponse,
 } from "@/types";
 
+let latestFetchRequestId = 0;
+
 interface ClipboardStore {
   items: ClipboardItem[];
   total: number;
@@ -38,6 +40,7 @@ export const useClipboardStore = create<ClipboardStore>((set) => ({
   error: null,
 
   fetchHistory: async (options = {}) => {
+    const requestId = ++latestFetchRequestId;
     set({ isLoading: true, error: null });
     try {
       const response = await invoke<ClipboardHistoryResponse>(
@@ -49,14 +52,24 @@ export const useClipboardStore = create<ClipboardStore>((set) => ({
         }
       );
 
+      if (requestId !== latestFetchRequestId) {
+        return;
+      }
+
       if (options.offset && options.offset > 0) {
         // Append to existing items for pagination
-        set((state) => ({
-          items: [...state.items, ...response.items],
-          total: response.total,
-          hasMore: response.hasMore,
-          isLoading: false,
-        }));
+        set((state) => {
+          if (requestId !== latestFetchRequestId) {
+            return state;
+          }
+
+          return {
+            items: [...state.items, ...response.items],
+            total: response.total,
+            hasMore: response.hasMore,
+            isLoading: false,
+          };
+        });
       } else {
         // Replace items for fresh fetch
         set({
@@ -67,6 +80,9 @@ export const useClipboardStore = create<ClipboardStore>((set) => ({
         });
       }
     } catch (error) {
+      if (requestId !== latestFetchRequestId) {
+        return;
+      }
       set({
         error: error instanceof Error ? error.message : String(error),
         isLoading: false,

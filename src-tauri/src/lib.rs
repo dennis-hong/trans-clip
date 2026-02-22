@@ -25,13 +25,84 @@ fn show_main_window_and_emit(app: &tauri::AppHandle, event_name: &str) {
     }
 }
 
+fn initialize_database(app_handle: &tauri::AppHandle) -> Result<Database, String> {
+    let primary_path = match app_handle.path().app_data_dir() {
+        Ok(dir) => dir.join("transclip.db"),
+        Err(err) => {
+            let fallback = std::env::temp_dir().join("trans-clip").join("transclip.db");
+            log::warn!(
+                "Failed to resolve app_data_dir ({}). Falling back to {}",
+                err,
+                fallback.display()
+            );
+            fallback
+        }
+    };
+
+    if let Some(parent) = primary_path.parent() {
+        if let Err(err) = std::fs::create_dir_all(parent) {
+            log::warn!(
+                "Failed to create database directory {}: {}",
+                parent.display(),
+                err
+            );
+        }
+    }
+
+    match tauri::async_runtime::block_on(async { Database::new(&primary_path).await }) {
+        Ok(db) => {
+            log::info!("Database initialized at {}", primary_path.display());
+            Ok(db)
+        }
+        Err(primary_err) => {
+            let fallback_path = std::env::temp_dir().join("trans-clip").join("transclip.db");
+
+            if fallback_path == primary_path {
+                return Err(format!(
+                    "Failed to initialize database at {}: {}",
+                    primary_path.display(),
+                    primary_err
+                ));
+            }
+
+            if let Some(parent) = fallback_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|err| {
+                    format!(
+                        "Failed to create fallback DB dir {}: {}",
+                        parent.display(),
+                        err
+                    )
+                })?;
+            }
+
+            match tauri::async_runtime::block_on(async { Database::new(&fallback_path).await }) {
+                Ok(db) => {
+                    log::warn!(
+                        "Primary DB init failed ({}). Using fallback path {}",
+                        primary_err,
+                        fallback_path.display()
+                    );
+                    Ok(db)
+                }
+                Err(fallback_err) => Err(format!(
+                    "Database initialization failed. primary={} ({}) fallback={} ({})",
+                    primary_path.display(),
+                    primary_err,
+                    fallback_path.display(),
+                    fallback_err
+                )),
+            }
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize logger for debug output
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     log::info!("TransClip starting...");
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -41,52 +112,48 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle().clone();
 
-            // Initialize database
-            let db_path = app_handle
-                .path()
-                .app_data_dir()
-                .map_err(|e| format!("Failed to get app data dir: {}", e))?
-                .join("transclip.db");
-
-            // Ensure directory exists
-            if let Some(parent) = db_path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-
-            let db = tauri::async_runtime::block_on(async {
-                Database::new(&db_path).await
-            })
-            .map_err(|e| format!("Failed to initialize database: {}", e))?;
-
+            let db = initialize_database(&app_handle)?;
             app.manage(AppState { db });
 
             // macOS app menu (top menu bar) - add manual update action.
             #[cfg(target_os = "macos")]
             {
-                let app_menu = Menu::default(app.handle())?;
-                let app_submenu = app_menu
-                    .items()?
-                    .into_iter()
-                    .find_map(|item| item.as_submenu().cloned());
+                if let Err(err) = (|| -> Result<(), String> {
+                    let app_menu = Menu::default(app.handle()).map_err(|e| e.to_string())?;
+                    let app_submenu = app_menu
+                        .items()
+                        .map_err(|e| e.to_string())?
+                        .into_iter()
+                        .find_map(|item| item.as_submenu().cloned());
 
-                if let Some(app_submenu) = app_submenu {
-                    let separator_before = PredefinedMenuItem::separator(app)?;
-                    let check_updates_app_item = MenuItem::with_id(
-                        app,
-                        "check_updates_app",
-                        "Check for Updates...",
-                        true,
-                        None::<&str>,
-                    )?;
-                    let separator_after = PredefinedMenuItem::separator(app)?;
+                    if let Some(app_submenu) = app_submenu {
+                        let separator_before =
+                            PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
+                        let check_updates_app_item = MenuItem::with_id(
+                            app,
+                            "check_updates_app",
+                            "Check for Updates...",
+                            true,
+                            None::<&str>,
+                        )
+                        .map_err(|e| e.to_string())?;
+                        let separator_after =
+                            PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
 
-                    app_submenu.insert_items(
-                        &[&separator_before, &check_updates_app_item, &separator_after],
-                        1,
-                    )?;
+                        app_submenu
+                            .insert_items(
+                                &[&separator_before, &check_updates_app_item, &separator_after],
+                                1,
+                            )
+                            .map_err(|e| e.to_string())?;
+                    }
+
+                    app.set_menu(app_menu).map_err(|e| e.to_string())?;
+                    Ok(())
+                })() {
+                    log::error!("Failed to initialize app menu: {}", err);
                 }
 
-                app.set_menu(app_menu)?;
                 app.on_menu_event(|app, event| {
                     if event.id().as_ref() == "check_updates_app" {
                         show_main_window_and_emit(app, "check_for_updates");
@@ -94,75 +161,109 @@ pub fn run() {
                 });
             }
 
-            // Create tray menu
-            let quit_item = MenuItem::with_id(app, "quit", "Quit TransClip", true, None::<&str>)?;
-            let show_item = MenuItem::with_id(app, "show", "Show History", true, None::<&str>)?;
-            let settings_item = MenuItem::with_id(app, "settings", "Settings...", true, None::<&str>)?;
-            let check_updates_item = MenuItem::with_id(
-                app,
-                "check_updates_tray",
-                "Check for Updates...",
-                true,
-                None::<&str>,
-            )?;
-            let feedback_item = MenuItem::with_id(app, "feedback", "Report Bug / Feedback", true, None::<&str>)?;
-            let menu = Menu::with_items(
-                app,
-                &[&show_item, &settings_item, &check_updates_item, &feedback_item, &quit_item],
-            )?;
+            if let Err(err) = (|| -> Result<(), String> {
+                // Create tray menu
+                let quit_item = MenuItem::with_id(app, "quit", "Quit TransClip", true, None::<&str>)
+                    .map_err(|e| e.to_string())?;
+                let show_item =
+                    MenuItem::with_id(app, "show", "Show History", true, None::<&str>)
+                        .map_err(|e| e.to_string())?;
+                let settings_item = MenuItem::with_id(
+                    app,
+                    "settings",
+                    "Settings...",
+                    true,
+                    None::<&str>,
+                )
+                .map_err(|e| e.to_string())?;
+                let check_updates_item = MenuItem::with_id(
+                    app,
+                    "check_updates_tray",
+                    "Check for Updates...",
+                    true,
+                    None::<&str>,
+                )
+                .map_err(|e| e.to_string())?;
+                let feedback_item = MenuItem::with_id(
+                    app,
+                    "feedback",
+                    "Report Bug / Feedback",
+                    true,
+                    None::<&str>,
+                )
+                .map_err(|e| e.to_string())?;
+                let menu = Menu::with_items(
+                    app,
+                    &[
+                        &show_item,
+                        &settings_item,
+                        &check_updates_item,
+                        &feedback_item,
+                        &quit_item,
+                    ],
+                )
+                .map_err(|e| e.to_string())?;
 
-            // Load tray icon from file
-            let icon = app
-                .path()
-                .resource_dir()
-                .ok()
-                .map(|dir| dir.join("icons/32x32.png"))
-                .and_then(|path| Image::from_path(&path).ok())
-                .or_else(|| {
-                    // Fallback to embedded icon if file not found
-                    Image::from_bytes(include_bytes!("../icons/32x32.png")).ok()
-                })
-                .ok_or("Failed to load tray icon from file or embedded resource")?;
+                // Load tray icon from file
+                let icon = app
+                    .path()
+                    .resource_dir()
+                    .ok()
+                    .map(|dir| dir.join("icons/32x32.png"))
+                    .and_then(|path| Image::from_path(&path).ok())
+                    .or_else(|| {
+                        // Fallback to embedded icon if file not found
+                        Image::from_bytes(include_bytes!("../icons/32x32.png")).ok()
+                    })
+                    .ok_or_else(|| "Failed to load tray icon from resources".to_string())?;
 
-            let _tray = TrayIconBuilder::new()
-                .icon(icon)
-                .menu(&menu)
-                .show_menu_on_left_click(true)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "quit" => {
-                        app.exit(0);
-                    }
-                    "show" => {
-                        show_main_window_and_emit(app, "show_history");
-                    }
-                    "settings" => {
-                        show_main_window_and_emit(app, "open_settings");
-                    }
-                    "check_updates_tray" => {
-                        show_main_window_and_emit(app, "check_for_updates");
-                    }
-                    "feedback" => {
-                        // Open GitHub issues page in default browser
-                        let _ = open::that("https://github.com/dennis-hong/trans-clip/issues");
-                    }
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            hotkey::show_window_at_position(&window);
-                            // Emit event to open history view
-                            let _ = window.emit("show_history", ());
+                let _tray = TrayIconBuilder::new()
+                    .icon(icon)
+                    .menu(&menu)
+                    .show_menu_on_left_click(true)
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "quit" => {
+                            hotkey::stop_hotkey_monitor();
+                            clipboard::stop_global_monitor();
+                            app.exit(0);
                         }
-                    }
-                })
-                .build(app)?;
+                        "show" => {
+                            show_main_window_and_emit(app, "show_history");
+                        }
+                        "settings" => {
+                            show_main_window_and_emit(app, "open_settings");
+                        }
+                        "check_updates_tray" => {
+                            show_main_window_and_emit(app, "check_for_updates");
+                        }
+                        "feedback" => {
+                            // Open GitHub issues page in default browser
+                            let _ = open::that("https://github.com/dennis-hong/trans-clip/issues");
+                        }
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            let app = tray.app_handle();
+                            if let Some(window) = app.get_webview_window("main") {
+                                hotkey::show_window_at_position(&window);
+                                // Emit event to open history view
+                                let _ = window.emit("show_history", ());
+                            }
+                        }
+                    })
+                    .build(app)
+                    .map_err(|e| e.to_string())?;
+
+                Ok(())
+            })() {
+                log::error!("Tray initialization failed: {}", err);
+            }
 
             // Initialize popup position from settings and migrate legacy API key only when needed.
             // Also load hotkey interval from settings for startup.
@@ -178,11 +279,11 @@ pub fn run() {
                         }
                     }
 
-                        // Only touch Keychain if a legacy SQLite key still exists.
-                        match db.get_api_key().await {
-                            Ok(Some(key)) if !key.is_empty() => {
-                                keychain::migrate_api_key_from_db(db).await;
-                            }
+                    // Only touch Keychain if a legacy SQLite key still exists.
+                    match db.get_api_key().await {
+                        Ok(Some(key)) if !key.is_empty() => {
+                            keychain::migrate_api_key_from_db(db).await;
+                        }
                         Ok(_) => {}
                         Err(e) => {
                             log::warn!("Failed to check legacy API key before migration: {}", e);
@@ -282,39 +383,50 @@ pub fn run() {
             commands::window::get_current_monitor_info,
             commands::window::save_window_width_for_monitor,
             commands::window::open_postit_editor,
-        ])
-        .build(tauri::generate_context!())
-        .unwrap_or_else(|e| {
+        ]);
+
+    let app = match builder.build(tauri::generate_context!()) {
+        Ok(app) => app,
+        Err(e) => {
             log::error!("Failed to build Tauri application: {}", e);
-            panic!("Failed to build Tauri application: {}", e);
-        })
-        .run(|app_handle, event| {
-            match event {
-                RunEvent::ExitRequested { api, .. } => {
-                    // Prevent the app from exiting when all windows are closed
-                    // This allows it to remain as a menu bar app
-                    api.prevent_exit();
-                }
-                RunEvent::WindowEvent {
-                    label,
-                    event: WindowEvent::CloseRequested { api, .. },
-                    ..
-                } => {
-                    // When close button is clicked, hide the window instead of destroying it
-                    if label == "main" {
-                        api.prevent_close();
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            let _ = window.hide();
-                        }
-                    }
-                }
-                RunEvent::Reopen { .. } => {
-                    // Handle dock icon click - show the main window
-                    if let Some(window) = app_handle.get_webview_window("main") {
-                        hotkey::show_window_at_position(&window);
-                    }
-                }
-                _ => {}
+            return;
+        }
+    };
+
+    app.run(|app_handle, event| match event {
+        RunEvent::ExitRequested { code, api, .. } => {
+            if code.is_none() {
+                // Prevent the app from exiting when all windows are closed
+                // This allows it to remain as a menu bar app
+                api.prevent_exit();
+            } else {
+                hotkey::stop_hotkey_monitor();
+                clipboard::stop_global_monitor();
             }
-        });
+        }
+        RunEvent::Exit => {
+            hotkey::stop_hotkey_monitor();
+            clipboard::stop_global_monitor();
+        }
+        RunEvent::WindowEvent {
+            label,
+            event: WindowEvent::CloseRequested { api, .. },
+            ..
+        } => {
+            // When close button is clicked, hide the window instead of destroying it
+            if label == "main" {
+                api.prevent_close();
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
+        }
+        RunEvent::Reopen { .. } => {
+            // Handle dock icon click - show the main window
+            if let Some(window) = app_handle.get_webview_window("main") {
+                hotkey::show_window_at_position(&window);
+            }
+        }
+        _ => {}
+    });
 }

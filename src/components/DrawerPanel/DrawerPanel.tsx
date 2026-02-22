@@ -620,7 +620,10 @@ export function DrawerPanel({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              invoke("open_accessibility_settings");
+              void invoke("open_accessibility_settings").catch((err) => {
+                console.error("Failed to open accessibility settings:", err);
+                setToast({ message: "접근성 설정을 열 수 없습니다", type: "error" });
+              });
             }}
             className="p-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 transition-colors"
             title="접근성 권한 필요"

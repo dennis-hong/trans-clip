@@ -6,10 +6,12 @@
 use crate::database::{ClipboardItemRow, Database};
 use crate::AppState;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
+
+static CLIPBOARD_MONITOR_RUNNING: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 
 /// Payload sent when clipboard content changes
 #[derive(Clone, serde::Serialize)]
@@ -32,9 +34,13 @@ pub struct ClipboardMonitor {
 
 impl ClipboardMonitor {
     pub fn new(app_handle: AppHandle) -> Self {
+        let running = CLIPBOARD_MONITOR_RUNNING
+            .get_or_init(|| Arc::new(AtomicBool::new(false)))
+            .clone();
+
         Self {
             app_handle,
-            running: Arc::new(AtomicBool::new(false)),
+            running,
             last_change_count: Arc::new(Mutex::new(-1)),
             last_content_hash: Arc::new(Mutex::new(0)),
         }
@@ -310,5 +316,12 @@ impl ClipboardMonitor {
         {
             None
         }
+    }
+}
+
+pub fn stop_global_monitor() {
+    if let Some(running) = CLIPBOARD_MONITOR_RUNNING.get() {
+        running.store(false, Ordering::SeqCst);
+        log::info!("Clipboard monitor stop requested");
     }
 }

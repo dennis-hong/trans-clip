@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { useSettingsStore, useUpdateStore } from "@/store";
@@ -30,11 +30,24 @@ export function SettingsPanel() {
   } = useUpdateStore();
 
   const [accessibilityGranted, setAccessibilityGranted] = useState<boolean | null>(null);
+  const accessibilityCheckTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      if (accessibilityCheckTimeoutRef.current) {
+        clearTimeout(accessibilityCheckTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const checkAccessibilityStatus = async (): Promise<boolean> => {
     try {
       const status = await invoke<PermissionStatus>("check_accessibility_permission");
-      setAccessibilityGranted(status.granted);
+      if (isMountedRef.current) {
+        setAccessibilityGranted(status.granted);
+      }
       return status.granted;
     } catch (err) {
       console.error("Failed to check accessibility:", err);
@@ -72,10 +85,16 @@ export function SettingsPanel() {
   const handleRequestAccessibility = async () => {
     try {
       await invoke("request_accessibility_permission");
-      setTimeout(() => {
+      if (accessibilityCheckTimeoutRef.current) {
+        clearTimeout(accessibilityCheckTimeoutRef.current);
+      }
+      accessibilityCheckTimeoutRef.current = setTimeout(() => {
         void (async () => {
+          if (!isMountedRef.current) {
+            return;
+          }
           const granted = await checkAccessibilityStatus();
-          if (!granted) {
+          if (!granted || !isMountedRef.current) {
             return;
           }
           try {

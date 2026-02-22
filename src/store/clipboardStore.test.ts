@@ -70,6 +70,45 @@ describe("useClipboardStore", () => {
     expect(state.hasMore).toBe(false);
   });
 
+  it("fetchHistory ignores stale responses when calls overlap", async () => {
+    let resolveFirst: ((value: unknown) => void) | undefined;
+    let resolveSecond: ((value: unknown) => void) | undefined;
+
+    invokeMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        })
+    );
+    invokeMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSecond = resolve;
+        })
+    );
+
+    const firstRequest = useClipboardStore.getState().fetchHistory({ searchQuery: "old" });
+    const secondRequest = useClipboardStore.getState().fetchHistory({ searchQuery: "new" });
+
+    resolveSecond?.({
+      items: [makeItem("2", "new-result")],
+      total: 1,
+      hasMore: false,
+    });
+    await secondRequest;
+
+    resolveFirst?.({
+      items: [makeItem("1", "old-result")],
+      total: 1,
+      hasMore: false,
+    });
+    await firstRequest;
+
+    const state = useClipboardStore.getState();
+    expect(state.items.map((item) => item.id)).toEqual(["2"]);
+    expect(state.items[0]?.content).toBe("new-result");
+  });
+
   it("addItem deduplicates by content and moves latest to top", () => {
     useClipboardStore.setState({
       items: [makeItem("1", "same"), makeItem("2", "other")],

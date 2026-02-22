@@ -251,6 +251,16 @@ pub async fn translate(
 
                 let glossary_ids: Vec<String> =
                     glossary_matches.iter().map(|g| g.id.clone()).collect();
+                let glossary_used = match serde_json::to_string(&glossary_ids) {
+                    Ok(value) => Some(value),
+                    Err(err) => {
+                        log::warn!(
+                            "Failed to serialize glossary IDs for cache entry (non-streaming): {}",
+                            err
+                        );
+                        None
+                    }
+                };
 
                 // Cache the translation
                 let translation = TranslationRow {
@@ -261,7 +271,7 @@ pub async fn translate(
                     target_language: tgt_lang,
                     model: use_model,
                     created_at: chrono::Utc::now().to_rfc3339(),
-                    glossary_used: Some(serde_json::to_string(&glossary_ids).unwrap()),
+                    glossary_used,
                     input_tokens,
                     output_tokens,
                 };
@@ -510,6 +520,16 @@ pub async fn translate_stream(
                     return Ok(());
                 }
             };
+            let glossary_used = match serde_json::to_string(&glossary_ids) {
+                Ok(value) => Some(value),
+                Err(err) => {
+                    log::warn!(
+                        "Failed to serialize glossary IDs for cache entry (streaming): {}",
+                        err
+                    );
+                    None
+                }
+            };
 
             // Cache the translation
             let db = &state.db;
@@ -521,7 +541,7 @@ pub async fn translate_stream(
                 target_language: tgt_lang,
                 model: use_model,
                 created_at: chrono::Utc::now().to_rfc3339(),
-                glossary_used: Some(serde_json::to_string(&glossary_ids).unwrap()),
+                glossary_used,
                 input_tokens,
                 output_tokens,
             };

@@ -1,8 +1,10 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { invokeWithTimeout } from "@/utils/invokeWithTimeout";
 import { normalizeSourceLanguage } from "@/utils/languageArgs";
 import type { TranslateStreamEvent, Language, TranslateResponse } from "@/types";
+
+const NOOP_TRANSLATE_HANDLER = () => {};
 
 interface UseTranslationStreamOptions {
   sourceLanguage?: Language | "auto";
@@ -38,6 +40,28 @@ export function useTranslationStream(
   const accumulatedTextRef = useRef("");
   // Ref to prevent concurrent translate calls
   const isTranslatingRef = useRef(false);
+  // Refs for lifecycle safety and stale-event guards
+  const activeChannelRef = useRef<Channel<TranslateStreamEvent> | null>(null);
+  const requestIdRef = useRef(0);
+  const isMountedRef = useRef(true);
+
+  const detachActiveChannel = useCallback(() => {
+    if (!activeChannelRef.current) {
+      return;
+    }
+    activeChannelRef.current.onmessage = NOOP_TRANSLATE_HANDLER;
+    activeChannelRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      requestIdRef.current += 1;
+      isTranslatingRef.current = false;
+      detachActiveChannel();
+    };
+  }, [detachActiveChannel]);
+
   const translate = useCallback(
     async (text: string, model?: string): Promise<void> => {
       // Prevent concurrent calls
@@ -45,6 +69,9 @@ export function useTranslationStream(
         return;
       }
       isTranslatingRef.current = true;
+      const requestId = ++requestIdRef.current;
+      const isStaleRequest = () => !isMountedRef.current || requestId !== requestIdRef.current;
+      detachActiveChannel();
 
       setError(null);
 
@@ -56,6 +83,10 @@ export function useTranslationStream(
           targetLanguage: options.targetLanguage,
           model,
         });
+
+        if (isStaleRequest()) {
+          return;
+        }
 
         if (cached) {
           setDetectedLanguage(cached.detectedLanguage ?? null);
@@ -74,6 +105,7 @@ export function useTranslationStream(
           }
 
           setIsStreaming(false);
+          detachActiveChannel();
           return;
         }
 
@@ -88,8 +120,13 @@ export function useTranslationStream(
         accumulatedTextRef.current = "";
 
         const channel = new Channel<TranslateStreamEvent>();
+        activeChannelRef.current = channel;
 
         channel.onmessage = (event: TranslateStreamEvent) => {
+          if (isStaleRequest()) {
+            return;
+          }
+
           switch (event.event) {
             case "started":
               setDetectedLanguage(event.data.detectedLanguage);
@@ -108,6 +145,9 @@ export function useTranslationStream(
               setStreamedText(finalText);
               setTokenUsage(event.data.tokenUsage);
               setIsStreaming(false);
+              if (activeChannelRef.current === channel) {
+                detachActiveChannel();
+              }
               break;
             }
             case "error":
@@ -115,6 +155,9 @@ export function useTranslationStream(
               setStreamedText("");
               setFullText("");
               setIsStreaming(false);
+              if (activeChannelRef.current === channel) {
+                detachActiveChannel();
+              }
               break;
           }
         };
@@ -126,15 +169,24 @@ export function useTranslationStream(
           model,
           onEvent: channel,
         });
+
+        if (isStaleRequest()) {
+          return;
+        }
       } catch (err) {
+        if (isStaleRequest()) {
+          return;
+        }
         const message = err instanceof Error ? err.message : String(err);
         setError(message);
         setIsStreaming(false);
       } finally {
-        isTranslatingRef.current = false;
+        if (requestId === requestIdRef.current) {
+          isTranslatingRef.current = false;
+        }
       }
     },
-    [options.sourceLanguage, options.targetLanguage]
+    [detachActiveChannel, options.sourceLanguage, options.targetLanguage]
   );
 
   const clearResult = useCallback(() => {
