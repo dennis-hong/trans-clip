@@ -1,9 +1,17 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { invokeWithTimeout } from "@/utils/invokeWithTimeout";
-import type { PolishStreamEvent, PolishContext, PolishChannel, PolishOption, Language } from "@/types";
+import type {
+  PolishStreamEvent,
+  PolishResponse,
+  PolishContext,
+  PolishChannel,
+  PolishOption,
+  Language,
+} from "@/types";
 
 const NOOP_POLISH_HANDLER = () => {};
+const EMPTY_POLISH_RESULT_MESSAGE = "다듬기 결과가 비어 있습니다. 다시 시도해 주세요.";
 
 interface UsePolishStreamReturn {
   polish: (
@@ -53,6 +61,25 @@ export function usePolishStream(): UsePolishStreamReturn {
     detachActiveChannel();
   }, [detachActiveChannel]);
 
+  const applyPolishResponse = useCallback((response: PolishResponse) => {
+    setDetectedLanguage(response.detectedLanguage ?? null);
+    setTokenUsage(response.tokenUsage ?? null);
+
+    const polishedText = response.polishedText ?? "";
+    setFullText(polishedText);
+    setStreamedText(polishedText);
+
+    if (!response.success && response.error) {
+      setError(response.error.message);
+    } else if (!polishedText.trim()) {
+      setError(EMPTY_POLISH_RESULT_MESSAGE);
+    } else {
+      setError(null);
+    }
+
+    setIsStreaming(false);
+  }, []);
+
   useEffect(() => {
     // React StrictMode (dev) runs effect cleanup + setup twice.
     // Reset mount flag on each setup so stale checks remain valid.
@@ -91,6 +118,9 @@ export function usePolishStream(): UsePolishStreamReturn {
       try {
         const channel = new Channel<PolishStreamEvent>();
         activeChannelRef.current = channel;
+        let terminalEventReceived = false;
+        let completedEventReceived = false;
+        let completedText = "";
 
         channel.onmessage = (event: PolishStreamEvent) => {
           if (isStaleRequest()) {
@@ -107,11 +137,19 @@ export function usePolishStream(): UsePolishStreamReturn {
               break;
             case "completed":
             {
+              terminalEventReceived = true;
+              completedEventReceived = true;
               // Use accumulated text as fallback if fullText is undefined
               const finalText = event.data.fullText ?? accumulatedTextRef.current;
+              completedText = finalText;
               setFullText(finalText);
               setStreamedText(finalText);
               setTokenUsage(event.data.tokenUsage);
+              if (!finalText.trim()) {
+                setError(EMPTY_POLISH_RESULT_MESSAGE);
+              } else {
+                setError(null);
+              }
               setIsStreaming(false);
               if (activeChannelRef.current === channel) {
                 detachActiveChannel();
@@ -119,6 +157,7 @@ export function usePolishStream(): UsePolishStreamReturn {
               break;
             }
             case "error":
+              terminalEventReceived = true;
               setError(event.data.message);
               setStreamedText("");
               setFullText("");
@@ -142,6 +181,30 @@ export function usePolishStream(): UsePolishStreamReturn {
         if (isStaleRequest()) {
           return;
         }
+
+        // Recovery path:
+        // If stream invocation returns without terminal events, or completion payload is empty,
+        // fall back to the non-streaming command to avoid indefinite loading UI.
+        if (!terminalEventReceived || (completedEventReceived && !completedText.trim())) {
+          if (activeChannelRef.current === channel) {
+            detachActiveChannel();
+          }
+          setIsStreaming(true);
+
+          const fallbackResponse = await invokeWithTimeout<PolishResponse>("polish", {
+            text,
+            context,
+            channel: polishChannel,
+            options,
+            model,
+          });
+
+          if (isStaleRequest()) {
+            return;
+          }
+
+          applyPolishResponse(fallbackResponse);
+        }
       } catch (err) {
         if (isStaleRequest()) {
           return;
@@ -158,7 +221,7 @@ export function usePolishStream(): UsePolishStreamReturn {
         }
       }
     },
-    [detachActiveChannel]
+    [applyPolishResponse, detachActiveChannel]
   );
 
   const clearResult = useCallback(() => {

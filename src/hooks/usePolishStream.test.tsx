@@ -87,6 +87,83 @@ describe("usePolishStream", () => {
     expect(result.current.isStreaming).toBe(false);
   });
 
+  it("falls back to non-streaming polish when stream returns without terminal events", async () => {
+    invokeWithTimeoutMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "polish_stream") {
+        return undefined;
+      }
+      if (cmd === "polish") {
+        return {
+          success: true,
+          polishedText: "fallback polish result",
+          detectedLanguage: "ko",
+          tokenUsage: { inputTokens: 7, outputTokens: 8 },
+        };
+      }
+      return undefined;
+    });
+
+    const { result } = renderHook(() => usePolishStream());
+
+    await act(async () => {
+      await result.current.polish("draft", "peer-discussion", "slack-message", []);
+    });
+
+    expect(result.current.fullText).toBe("fallback polish result");
+    expect(result.current.streamedText).toBe("fallback polish result");
+    expect(result.current.error).toBeNull();
+    expect(result.current.isStreaming).toBe(false);
+    expect(invokeWithTimeoutMock).toHaveBeenCalledWith(
+      "polish",
+      expect.objectContaining({ text: "draft" })
+    );
+  });
+
+  it("falls back to non-streaming polish when stream completes with empty text", async () => {
+    invokeWithTimeoutMock.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
+      if (cmd === "polish_stream") {
+        const channel = args.onEvent as {
+          onmessage?: (event: {
+            event: string;
+            data: Record<string, unknown>;
+          }) => void;
+        };
+        channel.onmessage?.({
+          event: "started",
+          data: { detectedLanguage: "ko" },
+        });
+        channel.onmessage?.({
+          event: "completed",
+          data: {
+            fullText: "",
+            tokenUsage: null,
+          },
+        });
+        return undefined;
+      }
+      if (cmd === "polish") {
+        return {
+          success: true,
+          polishedText: "fallback from empty completion",
+          detectedLanguage: "ko",
+          tokenUsage: null,
+        };
+      }
+      return undefined;
+    });
+
+    const { result } = renderHook(() => usePolishStream());
+
+    await act(async () => {
+      await result.current.polish("draft", "peer-discussion", "slack-message", []);
+    });
+
+    expect(result.current.fullText).toBe("fallback from empty completion");
+    expect(result.current.streamedText).toBe("fallback from empty completion");
+    expect(result.current.error).toBeNull();
+    expect(result.current.isStreaming).toBe(false);
+  });
+
   it("clears active stream handlers when clearResult is called", async () => {
     let activeChannel:
       | {

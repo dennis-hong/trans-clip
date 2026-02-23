@@ -30,7 +30,6 @@ export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupPro
   const { handleDragStart } = useWindowDrag();
   const [editableText, setEditableText] = useState(sourceText);
   const [isSaved, setIsSaved] = useState(false);
-  const isInitialMount = useRef(true);
   const [selectedModel, setSelectedModel] = useState<ClaudeModel | undefined>(undefined);
   const saveStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -57,13 +56,13 @@ export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupPro
     toggleOption,
   } = usePolishStore();
 
-  // Polish on mount only
+  // Polish on source text changes (including first mount)
   useEffect(() => {
-    if (sourceText && isInitialMount.current) {
-      isInitialMount.current = false;
+    if (sourceText) {
       polish(sourceText, lastContext, lastChannel, lastOptions);
     }
-  }, [sourceText, lastContext, lastChannel, lastOptions, polish]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceText]);
 
   const handleCopy = useCallback(async () => {
     const textToCopy = fullText || streamedText;
@@ -408,7 +407,6 @@ export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupPro
         <div className="hidden sm:flex items-center gap-1 text-[10px] text-gray-400 mr-auto">
           <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">ESC</span>
           <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">⌘↵</span>
-          <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">Ctrl↵</span>
         </div>
         <button
           onClick={handleTranslate}
@@ -439,10 +437,10 @@ export function PolishPopup({ sourceText, onClose, onTranslate }: PolishPopupPro
           onClick={handleReplace}
           disabled={isStreaming || !hasResult}
           className="px-4 py-2 text-sm font-medium text-white bg-purple-500 rounded-lg hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          title="바꾸기 (⌘+Enter / Ctrl+Enter)"
+          title="바꾸기 (⌘+Enter)"
         >
           바꾸기
-          <span className="ml-1.5 text-[10px] opacity-70">⌘↵ / Ctrl↵</span>
+          <span className="ml-1.5 text-[10px] opacity-70">⌘↵</span>
         </button>
       </div>
     </div>

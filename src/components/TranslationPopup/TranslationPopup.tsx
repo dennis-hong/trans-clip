@@ -331,7 +331,6 @@ export function TranslationPopup({
           <div className="hidden sm:flex items-center gap-1 text-[10px] text-gray-400">
             <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">ESC</span>
             <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">⌘↵</span>
-            <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">Ctrl↵</span>
           </div>
           <button
             onClick={handleSaveAsPostIt}
@@ -355,10 +354,10 @@ export function TranslationPopup({
             onClick={handleReplace}
             disabled={isStreaming || !hasResult}
             className="px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            title="바꾸기 (⌘+Enter / Ctrl+Enter)"
+            title="바꾸기 (⌘+Enter)"
           >
             바꾸기
-            <span className="ml-1.5 text-[10px] opacity-70">⌘↵ / Ctrl↵</span>
+            <span className="ml-1.5 text-[10px] opacity-70">⌘↵</span>
           </button>
         </div>
       </div>
