@@ -54,6 +54,9 @@ export function usePolishStream(): UsePolishStreamReturn {
   }, [detachActiveChannel]);
 
   useEffect(() => {
+    // React StrictMode (dev) runs effect cleanup + setup twice.
+    // Reset mount flag on each setup so stale checks remain valid.
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
       invalidateActiveRequest();

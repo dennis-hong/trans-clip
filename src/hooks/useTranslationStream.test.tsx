@@ -1,4 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
+import { StrictMode, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useTranslationStream } from "./useTranslationStream";
 
@@ -89,6 +90,142 @@ describe("useTranslationStream", () => {
     expect(result.current.fullText).toBe("안녕");
     expect(result.current.isStreaming).toBe(false);
     expect(result.current.tokenUsage).toEqual({ inputTokens: 10, outputTokens: 20 });
+  });
+
+  it("falls back to non-streaming translate when stream returns without terminal events", async () => {
+    invokeWithTimeoutMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_cached_translation") {
+        return null;
+      }
+      if (cmd === "translate_stream") {
+        return undefined;
+      }
+      if (cmd === "translate") {
+        return {
+          success: true,
+          translatedText: "안녕하세요",
+          detectedLanguage: "en",
+          fromCache: false,
+          glossaryApplied: [],
+          tokenUsage: { inputTokens: 11, outputTokens: 22 },
+        };
+      }
+      return undefined;
+    });
+
+    const { result } = renderHook(() => useTranslationStream());
+
+    await act(async () => {
+      await result.current.translate("hello");
+    });
+
+    expect(result.current.fullText).toBe("안녕하세요");
+    expect(result.current.streamedText).toBe("안녕하세요");
+    expect(result.current.error).toBeNull();
+    expect(result.current.isStreaming).toBe(false);
+    expect(invokeWithTimeoutMock).toHaveBeenCalledWith(
+      "translate",
+      expect.objectContaining({ text: "hello" })
+    );
+  });
+
+  it("falls back to non-streaming translate when stream completes with empty text", async () => {
+    invokeWithTimeoutMock.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
+      if (cmd === "get_cached_translation") {
+        return null;
+      }
+      if (cmd === "translate_stream") {
+        const channel = args.onEvent as {
+          onmessage?: (event: {
+            event: string;
+            data: Record<string, unknown>;
+          }) => void;
+        };
+        channel.onmessage?.({
+          event: "started",
+          data: {
+            detectedLanguage: "en",
+            fromCache: false,
+            glossaryApplied: [],
+          },
+        });
+        channel.onmessage?.({
+          event: "completed",
+          data: {
+            fullText: "",
+            tokenUsage: null,
+          },
+        });
+        return undefined;
+      }
+      if (cmd === "translate") {
+        return {
+          success: true,
+          translatedText: "fallback result",
+          detectedLanguage: "en",
+          fromCache: false,
+          glossaryApplied: [],
+          tokenUsage: null,
+        };
+      }
+      return undefined;
+    });
+
+    const { result } = renderHook(() => useTranslationStream());
+
+    await act(async () => {
+      await result.current.translate("hello");
+    });
+
+    expect(result.current.fullText).toBe("fallback result");
+    expect(result.current.streamedText).toBe("fallback result");
+    expect(result.current.error).toBeNull();
+    expect(result.current.isStreaming).toBe(false);
+  });
+
+  it("does not stale-out under React StrictMode", async () => {
+    invokeWithTimeoutMock.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
+      if (cmd === "get_cached_translation") {
+        return null;
+      }
+      if (cmd === "translate_stream") {
+        const channel = args.onEvent as {
+          onmessage?: (event: {
+            event: string;
+            data: Record<string, unknown>;
+          }) => void;
+        };
+        channel.onmessage?.({
+          event: "started",
+          data: {
+            detectedLanguage: "en",
+            fromCache: false,
+            glossaryApplied: [],
+          },
+        });
+        channel.onmessage?.({
+          event: "completed",
+          data: {
+            fullText: "strict mode ok",
+            tokenUsage: null,
+          },
+        });
+      }
+      return undefined;
+    });
+
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <StrictMode>{children}</StrictMode>
+    );
+    const { result } = renderHook(() => useTranslationStream(), { wrapper });
+
+    await act(async () => {
+      await result.current.translate("hello");
+    });
+
+    expect(result.current.fullText).toBe("strict mode ok");
+    expect(result.current.error).toBeNull();
+    expect(result.current.isStreaming).toBe(false);
   });
 
   it("ignores concurrent translate calls", async () => {
