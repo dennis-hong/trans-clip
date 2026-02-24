@@ -35,6 +35,24 @@ export function PostItEditorWindow() {
   const [isSaving, setIsSaving] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const closeEditorWindow = useCallback(async () => {
+    const currentWindow = getCurrentWindow();
+
+    // Prefer close() so save/cancel always dismisses the editor window.
+    try {
+      await currentWindow.close();
+      return;
+    } catch (closeError) {
+      console.error("Failed to close editor window, trying hide():", closeError);
+    }
+
+    try {
+      await currentWindow.hide();
+    } catch (hideError) {
+      console.error("Failed to hide editor window:", hideError);
+    }
+  }, []);
+
   useEffect(() => {
     const unlisten = listen<EditorParams>("postit_editor_open", (event) => {
       const nextParams = normalizeEditorParams(event.payload);
@@ -108,24 +126,19 @@ export function PostItEditorWindow() {
 
       // Emit event to notify main window
       await emit("postit_saved", { mode: params.mode, itemId: params.itemId });
-
-      // Hide the editor instead of closing it to avoid WebKit window teardown races.
-      const currentWindow = getCurrentWindow();
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      await currentWindow.hide();
     } catch (error) {
       console.error("Failed to save:", error);
       setIsSaving(false);
+      return;
     }
-  }, [content, params, isSaving]);
+
+    await closeEditorWindow();
+  }, [content, params, isSaving, closeEditorWindow]);
 
   const handleClose = useCallback(async () => {
     setIsSaving(false);
-    const currentWindow = getCurrentWindow();
-    // Small delay to let pending UI tasks settle before hiding.
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    await currentWindow.hide();
-  }, []);
+    await closeEditorWindow();
+  }, [closeEditorWindow]);
 
   // Handle keyboard shortcuts
   useEffect(() => {
