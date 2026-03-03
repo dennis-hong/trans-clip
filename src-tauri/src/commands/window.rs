@@ -719,7 +719,7 @@ pub async fn set_drawer_collapsed(
 ) -> Result<(), String> {
     // Legacy wrapper for backwards compatibility
     let mode = if collapsed { "collapsed" } else { "expanded" };
-    set_drawer_mode(app, state, mode.to_string()).await
+    set_drawer_mode(app, state, mode.to_string(), None).await
 }
 
 #[tauri::command]
@@ -727,6 +727,7 @@ pub async fn set_drawer_mode(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     mode: String,
+    preferred_height: Option<i32>,
 ) -> Result<(), String> {
     let window = app.get_webview_window("main").ok_or("Window not found")?;
 
@@ -833,11 +834,16 @@ pub async fn set_drawer_mode(
         }
     };
     // Set new height based on mode
+    let popup_min_height = 350;
+    let popup_max_height = ((mon_logical_height as f64 * 0.72).round() as i32).min(760);
+    let popup_max_height = popup_max_height.max(popup_min_height);
     let new_logical_height = match mode.as_str() {
         "collapsed" => 48, // Just header
         "expanded" => 280, // History view (header ~48px + padding ~24px + card 192px)
         "full" => 450,     // Settings/Glossary view
-        "popup" => 350,    // Translation/Polish popup view
+        "popup" => preferred_height
+            .unwrap_or(popup_min_height)
+            .clamp(popup_min_height, popup_max_height),
         _ => 280,
     };
 
@@ -869,13 +875,16 @@ pub async fn set_drawer_mode(
         .map_err(|e| e.to_string())?;
 
     log::info!(
-        "set_drawer_mode: mode={}, monitor={}, size={}x{}, pos=({}, {})",
+        "set_drawer_mode: mode={}, monitor={}, size={}x{}, pos=({}, {}), preferred_height={:?}, popup_height_range={}..={}",
         mode,
         monitor_index,
         saved_width,
         new_logical_height,
         new_x,
-        new_y
+        new_y,
+        preferred_height,
+        popup_min_height,
+        popup_max_height
     );
 
     Ok(())

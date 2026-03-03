@@ -17,6 +17,8 @@ const listenMock = vi.fn((eventName: string, callback: ListenerCallback) => {
   });
 });
 const hideMock = vi.fn();
+const onResizedMock = vi.fn(() => Promise.resolve(() => {}));
+const scaleFactorMock = vi.fn(() => Promise.resolve(1));
 const relaunchMock = vi.fn();
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -30,6 +32,8 @@ vi.mock("@tauri-apps/api/event", () => ({
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     hide: hideMock,
+    onResized: onResizedMock,
+    scaleFactor: scaleFactorMock,
   }),
 }));
 
@@ -79,6 +83,10 @@ describe("App", () => {
     invokeMock.mockReset();
     listenMock.mockClear();
     hideMock.mockReset();
+    onResizedMock.mockReset();
+    onResizedMock.mockImplementation(() => Promise.resolve(() => {}));
+    scaleFactorMock.mockReset();
+    scaleFactorMock.mockResolvedValue(1);
     relaunchMock.mockReset();
 
     invokeMock.mockImplementation((command: string) => {

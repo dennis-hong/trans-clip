@@ -8,11 +8,13 @@ import { CLAUDE_MODELS, type ClaudeModel } from "@/types";
 interface TranslationPopupProps {
   sourceText: string;
   onClose: () => void;
+  onPreferredHeightChange?: (height: number) => void;
 }
 
 export function TranslationPopup({
   sourceText,
   onClose,
+  onPreferredHeightChange,
 }: TranslationPopupProps) {
   const {
     translate,
@@ -30,11 +32,19 @@ export function TranslationPopup({
   const [isSaved, setIsSaved] = useState(false);
   const [selectedModel, setSelectedModel] = useState<ClaudeModel | undefined>(undefined);
   const saveStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const heightMeasureTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSuggestedHeightRef = useRef<number | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const sourceTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const resultContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     return () => {
       if (saveStatusTimeoutRef.current) {
         clearTimeout(saveStatusTimeoutRef.current);
+      }
+      if (heightMeasureTimeoutRef.current) {
+        clearTimeout(heightMeasureTimeoutRef.current);
       }
     };
   }, []);
@@ -143,8 +153,64 @@ export function TranslationPopup({
         ? "번역이 완료되었습니다."
         : "번역을 준비 중입니다.";
 
+  const schedulePreferredHeightUpdate = useCallback(() => {
+    if (!onPreferredHeightChange) {
+      return;
+    }
+
+    if (heightMeasureTimeoutRef.current) {
+      clearTimeout(heightMeasureTimeoutRef.current);
+    }
+
+    heightMeasureTimeoutRef.current = setTimeout(() => {
+      const containerEl = containerRef.current;
+      const sourceEl = sourceTextareaRef.current;
+      const resultEl = resultContainerRef.current;
+
+      if (!containerEl || !sourceEl || !resultEl) {
+        return;
+      }
+
+      const visibleContentHeight = Math.max(
+        sourceEl.clientHeight,
+        resultEl.clientHeight,
+        1
+      );
+      const baseChromeHeight = Math.max(containerEl.clientHeight - visibleContentHeight, 0);
+      const desiredContentHeight = Math.max(
+        sourceEl.scrollHeight,
+        resultEl.scrollHeight,
+        180
+      );
+
+      let suggestedHeight = Math.round(baseChromeHeight + desiredContentHeight + 20);
+      if (isStreaming && lastSuggestedHeightRef.current !== null) {
+        suggestedHeight = Math.max(suggestedHeight, lastSuggestedHeightRef.current);
+      }
+
+      if (
+        lastSuggestedHeightRef.current === null
+        || Math.abs(suggestedHeight - lastSuggestedHeightRef.current) >= 24
+      ) {
+        lastSuggestedHeightRef.current = suggestedHeight;
+        onPreferredHeightChange(suggestedHeight);
+      }
+    }, 120);
+  }, [isStreaming, onPreferredHeightChange]);
+
+  useEffect(() => {
+    schedulePreferredHeightUpdate();
+  }, [
+    editableText,
+    fullText,
+    streamedText,
+    error,
+    isStreaming,
+    schedulePreferredHeightUpdate,
+  ]);
+
   return (
-    <div className="flex flex-col h-full w-full">
+    <div ref={containerRef} className="flex flex-col h-full w-full">
       {/* Header - Draggable area */}
       <div
         className="flex items-center gap-3 px-4 py-2 cursor-move select-none border-b border-gray-200/50"
@@ -231,6 +297,7 @@ export function TranslationPopup({
               )}
             </div>
             <textarea
+              ref={sourceTextareaRef}
               value={editableText}
               onChange={(e) => setEditableText(e.target.value)}
               className="flex-1 p-4 bg-yellow-100 border-2 border-yellow-300 rounded-lg shadow-md resize-none text-sm text-gray-800 leading-relaxed focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400"
@@ -254,6 +321,7 @@ export function TranslationPopup({
               </span>
             </div>
             <div
+              ref={resultContainerRef}
               className="flex-1 p-4 bg-blue-100 border-2 border-blue-300 rounded-lg shadow-md overflow-y-auto"
               role="status"
               aria-live="polite"
