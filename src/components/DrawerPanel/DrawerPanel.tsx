@@ -665,7 +665,7 @@ export function DrawerPanel({
           <div className="hidden sm:flex items-center gap-1 text-[10px] text-gray-400">
             <HotkeyHint keys="⌘CC" description="선택한 텍스트 번역 (Cmd+C 두 번)" />
             <HotkeyHint keys="⌘DD" description="선택한 텍스트 다듬기 (Cmd+D 두 번)" />
-            <HotkeyHint keys="⌘⇧V" description="클립보드 히스토리 열기" />
+            <HotkeyHint keys="⌘⌥V" description="클립보드 히스토리 열기" />
             {isStealthMode && (
               <>
                 <HotkeyHint keys="1-9" description="N번째 항목 클립보드에 복사" />

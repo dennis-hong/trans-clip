@@ -158,7 +158,7 @@ function App() {
     };
   }, []);
 
-  // Listen for show_history events (Cmd+Shift+V or tray click)
+  // Listen for show_history events (Cmd+Option+V or tray click)
   useEffect(() => {
     const unlisten = listen<ShowHistoryPayload>("show_history", () => {
       setPopupMode("history");

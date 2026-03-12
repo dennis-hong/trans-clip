@@ -126,6 +126,7 @@ mod macos {
     // CGEventFlags
     const K_CG_EVENT_FLAG_MASK_COMMAND: u64 = 0x00100000;
     const K_CG_EVENT_FLAG_MASK_SHIFT: u64 = 0x00020000;
+    const K_CG_EVENT_FLAG_MASK_OPTION: u64 = 0x00080000;
 
     // CGEventTap types
     type CGEventRef = *mut c_void;
@@ -226,6 +227,7 @@ mod macos {
 
             let is_cmd_pressed = (flags & K_CG_EVENT_FLAG_MASK_COMMAND) != 0;
             let is_shift_pressed = (flags & K_CG_EVENT_FLAG_MASK_SHIFT) != 0;
+            let is_option_pressed = (flags & K_CG_EVENT_FLAG_MASK_OPTION) != 0;
             let is_c_key = keycode == KEY_C;
             let is_d_key = keycode == KEY_D;
             let is_v_key = keycode == KEY_V;
@@ -237,9 +239,9 @@ mod macos {
 
             let interval = DOUBLE_PRESS_INTERVAL_MS.load(Ordering::SeqCst);
 
-            // Cmd+Shift+V detected - show clipboard history
-            if is_cmd_pressed && is_shift_pressed && is_v_key {
-                log::info!("Cmd+Shift+V detected! Showing clipboard history");
+            // Cmd+Option+V detected - show clipboard history
+            if is_cmd_pressed && is_option_pressed && is_v_key {
+                log::info!("Cmd+Option+V detected! Showing clipboard history");
 
                 // Reset timers to prevent interference
                 LAST_CMD_C_TIME.store(0, Ordering::SeqCst);

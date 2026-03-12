@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TransClip is a macOS menu bar app for instant AI-powered translation (Korean ↔ English) and clipboard management. Built with Tauri 2.0 (Rust backend + React/TypeScript frontend).
 
-**Core interactions**: Double-press Cmd+C → translate, double-press Cmd+D → polish/refine text, Cmd+Shift+V → clipboard history.
+**Core interactions**: Double-press Cmd+C → translate, double-press Cmd+D → polish/refine text, Cmd+Option+V → clipboard history.
 
 ## Commands
 

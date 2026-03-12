@@ -379,7 +379,7 @@ export interface PolishPayload {
 }
 
 /**
- * 히스토리 표시 이벤트 페이로드 (Cmd+Shift+V 또는 트레이 클릭)
+ * 히스토리 표시 이벤트 페이로드 (Cmd+Option+V 또는 트레이 클릭)
  */
 export interface ShowHistoryPayload {
   timestamp?: string;
