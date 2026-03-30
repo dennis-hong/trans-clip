@@ -120,6 +120,22 @@ export function DrawerPanel({
 
   const { items, isLoading, fetchHistory, deleteItem, togglePin } = useClipboardStore();
 
+  const loadMonitors = useCallback(async () => {
+    try {
+      const result = await invoke<MonitorInfo[]>("get_monitors");
+      setMonitors(result);
+      
+      if (savedMonitorIndex != null && savedMonitorIndex < result.length) {
+        setCurrentMonitor(savedMonitorIndex);
+      } else {
+        const currentIdx = await invoke<number>("get_current_monitor_index");
+        setCurrentMonitor(currentIdx);
+      }
+    } catch (err) {
+      console.error("Failed to get monitors:", err);
+    }
+  }, [savedMonitorIndex, setCurrentMonitor]);
+
   // Keep a ref to items for keyboard handler (avoids re-registering listener on every items change)
   const itemsRef = useRef(items);
   itemsRef.current = items;
@@ -141,7 +157,7 @@ export function DrawerPanel({
       }
     };
     initWidth();
-  }, [fetchHistory]);
+  }, [fetchHistory, loadMonitors]);
 
   useEffect(() => {
     return () => {
@@ -356,23 +372,7 @@ export function DrawerPanel({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [monitors.length, currentView, isStealthMode, onClose, onTranslate, onPolish, handleCreateNewItem, scheduleTimeout]);
-
-  const loadMonitors = async () => {
-    try {
-      const result = await invoke<MonitorInfo[]>("get_monitors");
-      setMonitors(result);
-      
-      if (savedMonitorIndex != null && savedMonitorIndex < result.length) {
-        setCurrentMonitor(savedMonitorIndex);
-      } else {
-        const currentIdx = await invoke<number>("get_current_monitor_index");
-        setCurrentMonitor(currentIdx);
-      }
-    } catch (err) {
-      console.error("Failed to get monitors:", err);
-    }
-  };
+  }, [monitors.length, currentView, isStealthMode, onClose, onTranslate, onPolish, handleCreateNewItem, scheduleTimeout, setCurrentMonitor]);
 
   const updateDrawerMode = useCallback(async (mode: DrawerMode) => {
     setDrawerMode(mode);
