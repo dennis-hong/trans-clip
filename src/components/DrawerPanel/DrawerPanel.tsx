@@ -60,6 +60,8 @@ interface DrawerPanelProps {
   onTranslate?: (text: string) => void;
   onPolish?: (text: string) => void;
   openSettingsSignal?: number;
+  savedMonitorIndex?: number | null;
+  onMonitorChange?: (index: number) => void;
 }
 
 export function DrawerPanel({
@@ -69,13 +71,20 @@ export function DrawerPanel({
   onTranslate,
   onPolish,
   openSettingsSignal,
+  savedMonitorIndex,
+  onMonitorChange,
 }: DrawerPanelProps) {
   const [currentView, setCurrentView] = useState<DrawerView>("history");
   const [drawerMode, setDrawerMode] = useState<DrawerMode>("expanded");
   const [searchQuery, setSearchQuery] = useState("");
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [monitors, setMonitors] = useState<MonitorInfo[]>([]);
-  const [currentMonitor, setCurrentMonitor] = useState(0);
+  const [currentMonitorInternal, setCurrentMonitorInternal] = useState(savedMonitorIndex ?? 0);
+  const setCurrentMonitor = useCallback((index: number) => {
+    setCurrentMonitorInternal(index);
+    onMonitorChange?.(index);
+  }, [onMonitorChange]);
+  const currentMonitor = currentMonitorInternal;
   const { handleDragStart } = useWindowDrag({
     onDragEnd: async () => {
       try {
@@ -351,13 +360,15 @@ export function DrawerPanel({
 
   const loadMonitors = async () => {
     try {
-      // Get monitors list (already sorted by position - left to right)
       const result = await invoke<MonitorInfo[]>("get_monitors");
       setMonitors(result);
       
-      // Get current monitor index based on window position
-      const currentIdx = await invoke<number>("get_current_monitor_index");
-      setCurrentMonitor(currentIdx);
+      if (savedMonitorIndex != null && savedMonitorIndex < result.length) {
+        setCurrentMonitor(savedMonitorIndex);
+      } else {
+        const currentIdx = await invoke<number>("get_current_monitor_index");
+        setCurrentMonitor(currentIdx);
+      }
     } catch (err) {
       console.error("Failed to get monitors:", err);
     }
@@ -664,7 +675,7 @@ export function DrawerPanel({
         {currentView === "history" && (
           <div className="hidden sm:flex items-center gap-1 text-[10px] text-gray-400">
             <HotkeyHint keys="⌘CC" description="선택한 텍스트 번역 (Cmd+C 두 번)" />
-            <HotkeyHint keys="⌘DD" description="선택한 텍스트 다듬기 (Cmd+D 두 번)" />
+            <HotkeyHint keys="⌘EE" description="선택한 텍스트 다듬기 (Cmd+E 두 번)" />
             <HotkeyHint keys="⌘⌥V" description="클립보드 히스토리 열기" />
             {isStealthMode && (
               <>

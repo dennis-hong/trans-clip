@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TransClip is a macOS menu bar app for instant AI-powered translation (Korean ↔ English) and clipboard management. Built with Tauri 2.0 (Rust backend + React/TypeScript frontend).
 
-**Core interactions**: Double-press Cmd+C → translate, double-press Cmd+D → polish/refine text, Cmd+Option+V → clipboard history.
+**Core interactions**: Double-press Cmd+C → translate, double-press Cmd+E → polish/refine text, Cmd+Option+V → clipboard history.
 
 ## Commands
 
@@ -65,7 +65,7 @@ Frontend (React)  ──invoke()──►  src-tauri/src/commands/*.rs
 
 ### Popup Modes
 
-App.tsx manages a `popupMode` state (`"none" | "translate" | "polish" | "history"`) that determines which UI is shown. Backend events (`double_copy_detected`, `double_press_d_detected`, `toggle_drawer`) trigger mode switches via Tauri event listeners.
+App.tsx manages a `popupMode` state (`"none" | "translate" | "polish" | "history"`) that determines which UI is shown. Backend events (`double_copy_detected`, `polish_detected`, `toggle_drawer`) trigger mode switches via Tauri event listeners.
 
 ### macOS-Specific
 

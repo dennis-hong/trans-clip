@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter, Manager};
 
 static LAST_CMD_C_TIME: AtomicU64 = AtomicU64::new(0);
-static LAST_CMD_D_TIME: AtomicU64 = AtomicU64::new(0);
+static LAST_CMD_E_TIME: AtomicU64 = AtomicU64::new(0);
 static HOTKEY_ENABLED: AtomicBool = AtomicBool::new(false);
 static DOUBLE_PRESS_INTERVAL_MS: AtomicU64 = AtomicU64::new(500);
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
@@ -120,7 +120,7 @@ mod macos {
 
     // Key codes on macOS
     const KEY_C: i64 = 8;
-    const KEY_D: i64 = 2;
+    const KEY_E: i64 = 14;
     const KEY_V: i64 = 9;
 
     // CGEventFlags
@@ -229,7 +229,7 @@ mod macos {
             let is_shift_pressed = (flags & K_CG_EVENT_FLAG_MASK_SHIFT) != 0;
             let is_option_pressed = (flags & K_CG_EVENT_FLAG_MASK_OPTION) != 0;
             let is_c_key = keycode == KEY_C;
-            let is_d_key = keycode == KEY_D;
+            let is_e_key = keycode == KEY_E;
             let is_v_key = keycode == KEY_V;
 
             let now = SystemTime::now()
@@ -245,7 +245,7 @@ mod macos {
 
                 // Reset timers to prevent interference
                 LAST_CMD_C_TIME.store(0, Ordering::SeqCst);
-                LAST_CMD_D_TIME.store(0, Ordering::SeqCst);
+                LAST_CMD_E_TIME.store(0, Ordering::SeqCst);
 
                 // Save the frontmost app before our popup steals focus
                 crate::commands::clipboard::save_frontmost_app();
@@ -261,8 +261,8 @@ mod macos {
             if is_cmd_pressed && !is_shift_pressed && is_c_key {
                 let last_time = LAST_CMD_C_TIME.swap(now, Ordering::SeqCst);
 
-                // Reset D timer to prevent cross-triggering
-                LAST_CMD_D_TIME.store(0, Ordering::SeqCst);
+                // Reset E timer to prevent cross-triggering
+                LAST_CMD_E_TIME.store(0, Ordering::SeqCst);
 
                 if last_time > 0 && (now - last_time) < interval {
                     log::info!("Double Cmd+C detected! Interval: {}ms", now - last_time);
@@ -280,18 +280,18 @@ mod macos {
                 }
             }
 
-            // Cmd+D detected - check for double-press for Polish
-            if is_cmd_pressed && !is_shift_pressed && is_d_key {
-                let last_time = LAST_CMD_D_TIME.swap(now, Ordering::SeqCst);
+            // Cmd+E detected - check for double-press for Polish
+            if is_cmd_pressed && !is_shift_pressed && is_e_key {
+                let last_time = LAST_CMD_E_TIME.swap(now, Ordering::SeqCst);
 
                 // Reset C timer to prevent cross-triggering
                 LAST_CMD_C_TIME.store(0, Ordering::SeqCst);
 
                 if last_time > 0 && (now - last_time) < interval {
-                    log::info!("Double Cmd+D detected! Interval: {}ms", now - last_time);
+                    log::info!("Double Cmd+E detected! Interval: {}ms", now - last_time);
 
                     // Reset the timer to prevent triple-press triggers
-                    LAST_CMD_D_TIME.store(0, Ordering::SeqCst);
+                    LAST_CMD_E_TIME.store(0, Ordering::SeqCst);
 
                     // Small delay then trigger polish
                     // Save the frontmost app before our popup steals focus
@@ -430,7 +430,7 @@ mod macos {
     fn trigger_polish() {
         if let Some(app_handle) = APP_HANDLE.get() {
             // First, simulate Cmd+C to copy the selected text
-            // since Cmd+D doesn't copy anything
+            // since Cmd+E doesn't copy anything
             log::info!("trigger_polish: Simulating Cmd+C to copy selected text");
             if let Err(e) = simulate_copy() {
                 log::error!("Failed to simulate copy: {}", e);

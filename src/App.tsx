@@ -20,6 +20,7 @@ function App() {
   const [hasAccessibility, setHasAccessibility] = useState<boolean | null>(null);
   const [openedFromHistory, setOpenedFromHistory] = useState(false);
   const [openSettingsSignal, setOpenSettingsSignal] = useState(0);
+  const [savedMonitorIndex, setSavedMonitorIndex] = useState<number | null>(null);
   const [popupPreferredHeight, setPopupPreferredHeight] = useState<number | null>(null);
   const [isPopupAutoHeightEnabled, setIsPopupAutoHeightEnabled] = useState(true);
   const hotkeyStartRequestedRef = useRef(false);
@@ -143,7 +144,7 @@ function App() {
     };
   }, []);
 
-  // Listen for polish events (Cmd+DD for polishing)
+  // Listen for polish events (Cmd+EE for polishing)
   useEffect(() => {
     const unlisten = listen<PolishPayload>("polish_detected", (event) => {
       const { text } = event.payload;
@@ -410,6 +411,8 @@ function App() {
           onTranslate={handleTranslateFromHistory}
           onPolish={handlePolishFromHistory}
           openSettingsSignal={openSettingsSignal}
+          savedMonitorIndex={savedMonitorIndex}
+          onMonitorChange={setSavedMonitorIndex}
         />
       </div>
     );
@@ -426,6 +429,8 @@ function App() {
         onTranslate={handleTranslateFromHistory}
         onPolish={handlePolishFromHistory}
         openSettingsSignal={openSettingsSignal}
+        savedMonitorIndex={savedMonitorIndex}
+        onMonitorChange={setSavedMonitorIndex}
       />
     </div>
   );
