@@ -4,7 +4,8 @@ pub fn build_system_prompt() -> String {
 
 - 원문의 내용, 구조, 분량을 유지하세요. 새로운 내용을 추가하거나 흐름을 재구성하지 마세요.
 - 원문에 없는 형식(불릿, 헤딩 등)을 추가하지 마세요.
-- 다듬어진 결과만 출력하세요. 설명이나 주석을 붙이지 마세요."#.to_string()
+- 다듬어진 결과만 출력하세요. 설명이나 주석을 붙이지 마세요."#
+        .to_string()
 }
 
 /// Build the English system prompt for polishing text
@@ -13,7 +14,8 @@ pub fn build_system_prompt_english() -> String {
 
 - Keep the original content, structure, and length. Do not add new content or reorganize the flow.
 - Do not add formatting (bullets, headings, etc.) that wasn't in the original.
-- Output only the polished result. No explanations or comments."#.to_string()
+- Output only the polished result. No explanations or comments."#
+        .to_string()
 }
 
 /// Get a brief hint for the context type
