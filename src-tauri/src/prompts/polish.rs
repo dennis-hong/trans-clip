@@ -132,8 +132,6 @@ pub fn build_user_prompt(
 
     let hint_line = if hints.is_empty() {
         String::new()
-    } else if detected_lang == "ko" {
-        format!("({}) ", hints.join(", "))
     } else {
         format!("({}) ", hints.join(", "))
     };
