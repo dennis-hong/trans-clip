@@ -6,6 +6,7 @@ const invokeWithTimeoutMock = vi.fn();
 
 vi.mock("@/utils/invokeWithTimeout", () => ({
   invokeWithTimeout: (...args: unknown[]) => invokeWithTimeoutMock(...args),
+  STREAMING_TIMEOUT_MS: 120_000,
 }));
 
 vi.mock("@tauri-apps/api/core", () => {
@@ -113,9 +114,10 @@ describe("usePolishStream", () => {
     expect(result.current.streamedText).toBe("fallback polish result");
     expect(result.current.error).toBeNull();
     expect(result.current.isStreaming).toBe(false);
-    expect(invokeWithTimeoutMock).toHaveBeenCalledWith(
+    expect(invokeWithTimeoutMock).toHaveBeenLastCalledWith(
       "polish",
-      expect.objectContaining({ text: "draft" })
+      expect.objectContaining({ text: "draft" }),
+      120_000
     );
   });
 
