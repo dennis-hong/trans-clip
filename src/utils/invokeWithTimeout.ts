@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+export const STREAMING_TIMEOUT_MS = 120_000;
 
 /**
  * Wraps Tauri invoke with a timeout to prevent infinite hangs.

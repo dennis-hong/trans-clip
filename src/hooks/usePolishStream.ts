@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import { invokeWithTimeout } from "@/utils/invokeWithTimeout";
+import { invokeWithTimeout, STREAMING_TIMEOUT_MS } from "@/utils/invokeWithTimeout";
 import type {
   PolishStreamEvent,
   PolishResponse,
@@ -176,7 +176,7 @@ export function usePolishStream(): UsePolishStreamReturn {
           options,
           model,
           onEvent: channel,
-        });
+        }, STREAMING_TIMEOUT_MS);
 
         if (isStaleRequest()) {
           return;
@@ -197,7 +197,7 @@ export function usePolishStream(): UsePolishStreamReturn {
             channel: polishChannel,
             options,
             model,
-          });
+          }, STREAMING_TIMEOUT_MS);
 
           if (isStaleRequest()) {
             return;

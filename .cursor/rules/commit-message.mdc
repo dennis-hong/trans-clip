@@ -1,0 +1,43 @@
+---
+description: Enforce conventional commit message format when creating git commits
+globs:
+alwaysApply: true
+---
+
+# Commit Message Format
+
+When creating git commits, always use the **Conventional Commits** format:
+
+```
+<keyword>: <one-sentence description>
+```
+
+## Keywords
+
+- `feat` — A new feature
+- `fix` — A bug fix
+- `refactor` — Code restructuring without behavior change
+- `chore` — Build, tooling, or dependency updates
+- `docs` — Documentation changes only
+- `style` — Formatting, whitespace, or code style (no logic change)
+- `test` — Adding or updating tests
+- `perf` — Performance improvement
+- `ci` — CI/CD configuration changes
+
+## Rules
+
+- The description must be a single, concise English sentence in lowercase (except proper nouns).
+- Do NOT capitalize the first letter of the description.
+- Do NOT end the description with a period.
+- The keyword must be one of the listed keywords above.
+- Use the imperative mood (e.g., "add" not "added" or "adds").
+- Keep the entire message under 72 characters when possible.
+
+## Examples
+
+- `feat: add clipboard history search functionality`
+- `fix: resolve hotkey detection on macOS Sequoia`
+- `refactor: extract streaming logic into shared utility`
+- `chore: update tauri dependencies to v2.1`
+- `docs: add architecture diagram to README`
+- `test: add unit tests for glossary store`

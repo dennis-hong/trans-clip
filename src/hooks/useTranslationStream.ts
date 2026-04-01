@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import { invokeWithTimeout } from "@/utils/invokeWithTimeout";
+import { invokeWithTimeout, STREAMING_TIMEOUT_MS } from "@/utils/invokeWithTimeout";
 import { normalizeSourceLanguage } from "@/utils/languageArgs";
 import type { TranslateStreamEvent, Language, TranslateResponse } from "@/types";
 
@@ -195,7 +195,7 @@ export function useTranslationStream(
           targetLanguage: options.targetLanguage,
           model,
           onEvent: channel,
-        });
+        }, STREAMING_TIMEOUT_MS);
 
         if (isStaleRequest()) {
           return;
@@ -215,7 +215,7 @@ export function useTranslationStream(
             sourceLanguage,
             targetLanguage: options.targetLanguage,
             model,
-          });
+          }, STREAMING_TIMEOUT_MS);
 
           if (isStaleRequest()) {
             return;
