@@ -12,6 +12,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 
 static CLIPBOARD_MONITOR_RUNNING: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+const MAX_CLIPBOARD_HISTORY_BYTES: usize = 50_000;
 
 /// Payload sent when clipboard content changes
 #[derive(Clone, serde::Serialize)]
@@ -190,6 +191,15 @@ impl ClipboardMonitor {
     /// Handle a clipboard change event
     async fn handle_clipboard_change(app_handle: &AppHandle, text: String) -> Result<(), String> {
         log::info!("Clipboard changed: {} chars", text.len());
+
+        if text.len() > MAX_CLIPBOARD_HISTORY_BYTES {
+            log::warn!(
+                "Skipping clipboard history save for oversized payload ({} bytes > {} bytes)",
+                text.len(),
+                MAX_CLIPBOARD_HISTORY_BYTES
+            );
+            return Ok(());
+        }
 
         // Get app state
         let state = app_handle

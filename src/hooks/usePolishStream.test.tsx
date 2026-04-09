@@ -239,4 +239,76 @@ describe("usePolishStream", () => {
     expect(result.current.streamedText).toBe("");
     expect(result.current.isStreaming).toBe(false);
   });
+
+  it("supersedes an in-flight polish request with the latest one", async () => {
+    let firstChannel:
+      | {
+          onmessage?: (event: {
+            event: string;
+            data: Record<string, unknown>;
+          }) => void;
+        }
+      | null = null;
+    let resolveFirstStream: (() => void) | undefined;
+
+    invokeWithTimeoutMock.mockImplementation((cmd: string, args: Record<string, unknown>) => {
+      if (cmd === "polish_stream" && args.text === "first draft") {
+        firstChannel = args.onEvent as {
+          onmessage?: (event: {
+            event: string;
+            data: Record<string, unknown>;
+          }) => void;
+        };
+        return new Promise<void>((resolve) => {
+          resolveFirstStream = resolve;
+        });
+      }
+
+      if (cmd === "polish_stream" && args.text === "second draft") {
+        const channel = args.onEvent as {
+          onmessage?: (event: {
+            event: string;
+            data: Record<string, unknown>;
+          }) => void;
+        };
+        channel.onmessage?.({
+          event: "started",
+          data: { detectedLanguage: "en" },
+        });
+        channel.onmessage?.({
+          event: "completed",
+          data: {
+            fullText: "latest polish",
+            tokenUsage: null,
+          },
+        });
+        return Promise.resolve(undefined);
+      }
+
+      return Promise.resolve(undefined);
+    });
+
+    const { result } = renderHook(() => usePolishStream());
+
+    let firstPromise: Promise<void> | undefined;
+    await act(async () => {
+      firstPromise = result.current.polish("first draft", "peer-discussion", "slack-message", []);
+      await Promise.resolve();
+      await result.current.polish("second draft", "peer-discussion", "slack-message", []);
+    });
+
+    expect(result.current.fullText).toBe("latest polish");
+    expect(result.current.streamedText).toBe("latest polish");
+    expect(result.current.detectedLanguage).toBe("en");
+
+    act(() => {
+      firstChannel?.onmessage?.({ event: "delta", data: { text: "stale" } });
+    });
+
+    expect(result.current.fullText).toBe("latest polish");
+    expect(result.current.streamedText).toBe("latest polish");
+
+    resolveFirstStream?.();
+    await firstPromise;
+  });
 });

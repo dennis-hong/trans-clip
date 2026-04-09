@@ -61,6 +61,16 @@ export function usePolishStream(): UsePolishStreamReturn {
     detachActiveChannel();
   }, [detachActiveChannel]);
 
+  const resetPolishState = useCallback(() => {
+    accumulatedTextRef.current = "";
+    setIsStreaming(false);
+    setStreamedText("");
+    setFullText("");
+    setError(null);
+    setTokenUsage(null);
+    setDetectedLanguage(null);
+  }, []);
+
   const applyPolishResponse = useCallback((response: PolishResponse) => {
     setDetectedLanguage(response.detectedLanguage ?? null);
     setTokenUsage(response.tokenUsage ?? null);
@@ -98,22 +108,16 @@ export function usePolishStream(): UsePolishStreamReturn {
       options: PolishOption[],
       model?: string
     ): Promise<void> => {
-      // Prevent concurrent calls
-      if (isPolishingRef.current) {
-        return;
-      }
+      // The latest request should win; otherwise the popup can show a new
+      // source text alongside an older polish result.
+      const requestId = requestIdRef.current + 1;
+      requestIdRef.current = requestId;
       isPolishingRef.current = true;
-      const requestId = ++requestIdRef.current;
       const isStaleRequest = () => !isMountedRef.current || requestId !== requestIdRef.current;
       detachActiveChannel();
+      resetPolishState();
 
       setIsStreaming(true);
-      setStreamedText("");
-      setFullText("");
-      setError(null);
-      setTokenUsage(null);
-      setDetectedLanguage(null);
-      accumulatedTextRef.current = "";
 
       try {
         const channel = new Channel<PolishStreamEvent>();
@@ -221,18 +225,13 @@ export function usePolishStream(): UsePolishStreamReturn {
         }
       }
     },
-    [applyPolishResponse, detachActiveChannel]
+    [applyPolishResponse, detachActiveChannel, resetPolishState]
   );
 
   const clearResult = useCallback(() => {
     invalidateActiveRequest();
-    setIsStreaming(false);
-    setStreamedText("");
-    setFullText("");
-    setError(null);
-    setTokenUsage(null);
-    setDetectedLanguage(null);
-  }, [invalidateActiveRequest]);
+    resetPolishState();
+  }, [invalidateActiveRequest, resetPolishState]);
 
   return {
     polish,

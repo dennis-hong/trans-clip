@@ -60,6 +60,18 @@ export function useTranslationStream(
     detachActiveChannel();
   }, [detachActiveChannel]);
 
+  const resetTranslateState = useCallback(() => {
+    accumulatedTextRef.current = "";
+    setIsStreaming(false);
+    setStreamedText("");
+    setFullText("");
+    setError(null);
+    setFromCache(false);
+    setGlossaryApplied([]);
+    setTokenUsage(null);
+    setDetectedLanguage(null);
+  }, []);
+
   const applyTranslateResponse = useCallback((response: TranslateResponse) => {
     setDetectedLanguage(response.detectedLanguage ?? null);
     setFromCache(response.fromCache);
@@ -93,17 +105,15 @@ export function useTranslationStream(
 
   const translate = useCallback(
     async (text: string, model?: string): Promise<void> => {
-      // Prevent concurrent calls
-      if (isTranslatingRef.current) {
-        return;
-      }
+      // The latest request should win; otherwise the popup can show a new
+      // source text alongside an older translation result.
+      const requestId = requestIdRef.current + 1;
+      requestIdRef.current = requestId;
       isTranslatingRef.current = true;
-      const requestId = ++requestIdRef.current;
       const isStaleRequest = () => !isMountedRef.current || requestId !== requestIdRef.current;
       detachActiveChannel();
+      resetTranslateState();
       const sourceLanguage = normalizeSourceLanguage(options.sourceLanguage);
-
-      setError(null);
 
       try {
         // Fast path: if cached, bypass streaming channel entirely.
@@ -126,13 +136,6 @@ export function useTranslationStream(
 
         // Streaming path (cache miss)
         setIsStreaming(true);
-        setStreamedText("");
-        setFullText("");
-        setFromCache(false);
-        setGlossaryApplied([]);
-        setTokenUsage(null);
-        setDetectedLanguage(null);
-        accumulatedTextRef.current = "";
 
         const channel = new Channel<TranslateStreamEvent>();
         activeChannelRef.current = channel;
@@ -239,20 +242,19 @@ export function useTranslationStream(
         }
       }
     },
-    [applyTranslateResponse, detachActiveChannel, options.sourceLanguage, options.targetLanguage]
+    [
+      applyTranslateResponse,
+      detachActiveChannel,
+      options.sourceLanguage,
+      options.targetLanguage,
+      resetTranslateState,
+    ]
   );
 
   const clearResult = useCallback(() => {
     invalidateActiveRequest();
-    setIsStreaming(false);
-    setStreamedText("");
-    setFullText("");
-    setError(null);
-    setFromCache(false);
-    setGlossaryApplied([]);
-    setTokenUsage(null);
-    setDetectedLanguage(null);
-  }, [invalidateActiveRequest]);
+    resetTranslateState();
+  }, [invalidateActiveRequest, resetTranslateState]);
 
   return {
     translate,

@@ -230,13 +230,40 @@ describe("useTranslationStream", () => {
     expect(result.current.isStreaming).toBe(false);
   });
 
-  it("ignores concurrent translate calls", async () => {
+  it("supersedes an in-flight translate call with the latest request", async () => {
+    let firstChannel:
+      | {
+          onmessage?: (event: {
+            event: string;
+            data: Record<string, unknown>;
+          }) => void;
+        }
+      | null = null;
     let resolveStream: (() => void) | undefined;
-    invokeWithTimeoutMock.mockImplementation((cmd: string) => {
+    invokeWithTimeoutMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
       if (cmd === "get_cached_translation") {
-        return Promise.resolve(null);
+        if (args?.text === "first") {
+          return Promise.resolve(null);
+        }
+
+        if (args?.text === "second") {
+          return Promise.resolve({
+            success: true,
+            translatedText: "두번째 결과",
+            detectedLanguage: "en",
+            fromCache: true,
+            glossaryApplied: [],
+            tokenUsage: null,
+          });
+        }
       }
-      if (cmd === "translate_stream") {
+      if (cmd === "translate_stream" && args?.text === "first") {
+        firstChannel = args.onEvent as {
+          onmessage?: (event: {
+            event: string;
+            data: Record<string, unknown>;
+          }) => void;
+        };
         return new Promise<void>((resolve) => {
           resolveStream = resolve;
         });
@@ -253,7 +280,16 @@ describe("useTranslationStream", () => {
       await result.current.translate("second");
     });
 
-    expect(invokeWithTimeoutMock).toHaveBeenCalledTimes(2);
+    expect(result.current.fullText).toBe("두번째 결과");
+    expect(result.current.streamedText).toBe("두번째 결과");
+    expect(result.current.fromCache).toBe(true);
+
+    act(() => {
+      firstChannel?.onmessage?.({ event: "delta", data: { text: "stale" } });
+    });
+
+    expect(result.current.fullText).toBe("두번째 결과");
+    expect(result.current.streamedText).toBe("두번째 결과");
 
     resolveStream?.();
     await firstPromise;

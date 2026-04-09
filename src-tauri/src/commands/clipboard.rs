@@ -70,8 +70,8 @@ pub async fn get_clipboard_history(
     search_query: Option<String>,
 ) -> Result<ClipboardHistoryResponse, String> {
     let db = &state.db;
-    let limit = limit.unwrap_or(50).min(200);
-    let offset = offset.unwrap_or(0);
+    let limit = limit.unwrap_or(50).clamp(1, 200);
+    let offset = offset.unwrap_or(0).max(0);
 
     let (items, total) = db
         .get_clipboard_history(limit, offset, search_query.as_deref())

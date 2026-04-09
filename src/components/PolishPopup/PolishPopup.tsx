@@ -11,6 +11,7 @@ import {
 } from "@/store";
 import type { PolishContext, PolishChannel, PolishOption, ClaudeModel } from "@/types";
 import { CLAUDE_MODELS } from "@/types";
+import { hideAndPasteText } from "@/utils/hideAndPasteText";
 
 interface PolishPopupProps {
   sourceText: string;
@@ -94,18 +95,14 @@ export function PolishPopup({
     const textToReplace = fullText || streamedText;
     if (textToReplace) {
       try {
-        // Run hide + paste in one backend command to avoid a race where the
-        // second invoke is dropped after hiding the WebView.
-        const response = await invoke<{
-          success: boolean;
-          error?: { code: string; message: string };
-        }>("hide_and_paste_text", { text: textToReplace });
+        const response = await hideAndPasteText(textToReplace);
         if (!response.success && response.error) {
           console.error(
             "Paste failed:",
             response.error.code,
             response.error.message
           );
+          return;
         }
         onClose();
       } catch (err) {
