@@ -366,7 +366,6 @@ function App() {
   // Handle translate from polish popup
   const handleTranslateFromPolish = useCallback((text: string) => {
     setSourceText(text);
-    setOpenedFromHistory(false);
     setPopupMode("translate");
   }, []);
 
