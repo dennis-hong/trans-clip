@@ -1,6 +1,8 @@
 use sqlx::{sqlite::SqlitePoolOptions, Pool, Sqlite};
 use std::path::Path;
 
+const DEFAULT_PREFERRED_MODEL: &str = "claude-sonnet-4-6";
+
 pub struct Database {
     pub pool: Pool<Sqlite>,
 }
@@ -131,7 +133,7 @@ impl Database {
             CREATE TABLE IF NOT EXISTS user_settings (
                 id TEXT PRIMARY KEY DEFAULT 'default',
                 max_history_count INTEGER NOT NULL DEFAULT 50,
-                preferred_model TEXT NOT NULL DEFAULT 'claude-haiku-4-5-20251001',
+                preferred_model TEXT NOT NULL DEFAULT 'claude-sonnet-4-6',
                 auto_detect_language INTEGER NOT NULL DEFAULT 1,
                 double_press_interval INTEGER NOT NULL DEFAULT 500,
                 translation_cache_days INTEGER NOT NULL DEFAULT 7,
@@ -205,9 +207,10 @@ impl Database {
         // Insert default settings if not exists
         sqlx::query(
             r#"
-            INSERT OR IGNORE INTO user_settings (id) VALUES ('default')
+            INSERT OR IGNORE INTO user_settings (id, preferred_model) VALUES ('default', ?)
             "#,
         )
+        .bind(DEFAULT_PREFERRED_MODEL)
         .execute(&self.pool)
         .await?;
 
@@ -963,8 +966,9 @@ pub struct UserSettingsRow {
 
 #[cfg(test)]
 mod tests {
-    use super::{ClipboardItemRow, Database};
+    use super::{ClipboardItemRow, Database, DEFAULT_PREFERRED_MODEL};
     use chrono::Utc;
+    use sqlx::sqlite::SqlitePoolOptions;
 
     fn test_db_path() -> std::path::PathBuf {
         std::env::temp_dir().join(format!("transclip-test-{}.db", uuid::Uuid::new_v4()))
@@ -1033,5 +1037,59 @@ mod tests {
         ));
         assert!(!Database::validate_api_key_format("sk-test-short"));
         assert!(!Database::validate_api_key_format("invalid-prefix-value"));
+    }
+
+    #[tokio::test]
+    async fn initializes_default_settings_with_sonnet_model_on_new_database() {
+        let path = test_db_path();
+        let db = Database::new(&path).await.expect("db should initialize");
+
+        let settings = db.get_settings().await.expect("should fetch settings");
+
+        assert_eq!(settings.preferred_model, DEFAULT_PREFERRED_MODEL);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn initializes_missing_default_settings_with_sonnet_model_on_existing_schema() {
+        let path = test_db_path();
+        let db_url = format!("sqlite:{}?mode=rwc", path.display());
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&db_url)
+            .await
+            .expect("pool should connect");
+
+        sqlx::query(
+            r#"
+            CREATE TABLE user_settings (
+                id TEXT PRIMARY KEY DEFAULT 'default',
+                max_history_count INTEGER NOT NULL DEFAULT 50,
+                preferred_model TEXT NOT NULL DEFAULT 'claude-haiku-4-5-20251001',
+                auto_detect_language INTEGER NOT NULL DEFAULT 1,
+                double_press_interval INTEGER NOT NULL DEFAULT 500,
+                translation_cache_days INTEGER NOT NULL DEFAULT 7,
+                show_source_app INTEGER NOT NULL DEFAULT 1,
+                popup_position TEXT NOT NULL DEFAULT 'cursor',
+                launch_at_login INTEGER NOT NULL DEFAULT 0,
+                paste_delay_ms INTEGER NOT NULL DEFAULT 150,
+                api_key TEXT,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("should create legacy user_settings table");
+
+        drop(pool);
+
+        let db = Database::new(&path).await.expect("db should initialize");
+        let settings = db.get_settings().await.expect("should fetch settings");
+
+        assert_eq!(settings.preferred_model, DEFAULT_PREFERRED_MODEL);
+
+        let _ = std::fs::remove_file(path);
     }
 }
