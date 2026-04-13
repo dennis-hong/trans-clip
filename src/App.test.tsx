@@ -61,9 +61,20 @@ vi.mock("@/components/TranslationPopup", () => ({
 }));
 
 vi.mock("@/components/PolishPopup", () => ({
-  PolishPopup: ({ sourceText, onClose }: { sourceText: string; onClose: () => void }) => (
+  PolishPopup: ({
+    sourceText,
+    onClose,
+    onTranslate,
+  }: {
+    sourceText: string;
+    onClose: () => void;
+    onTranslate?: (text: string) => void;
+  }) => (
     <div data-testid="polish-popup">
       <span>{sourceText}</span>
+      <button data-testid="polish-translate" onClick={() => onTranslate?.("polished-history-text")}>
+        translate
+      </button>
       <button data-testid="polish-close" onClick={onClose}>close</button>
     </div>
   ),
@@ -139,6 +150,35 @@ describe("App", () => {
 
     fireEvent.click(screen.getByTestId("drawer-translate"));
     expect(await screen.findByTestId("translation-popup")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("translation-close"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("drawer-panel")).toBeInTheDocument();
+    });
+    expect(hideMock).not.toHaveBeenCalled();
+  });
+
+  it("returns to history after switching from polish to translate from history", async () => {
+    await act(async () => {
+      render(<App />);
+    });
+
+    await waitFor(() => {
+      expect(listenMock).toHaveBeenCalled();
+    });
+
+    act(() => {
+      emit("show_history", {});
+    });
+    expect(await screen.findByTestId("drawer-panel")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("drawer-polish"));
+    expect(await screen.findByTestId("polish-popup")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("polish-translate"));
+    expect(await screen.findByTestId("translation-popup")).toBeInTheDocument();
+    expect(screen.getByText("polished-history-text")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("translation-close"));
 
