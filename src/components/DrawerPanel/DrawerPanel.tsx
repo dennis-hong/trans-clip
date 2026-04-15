@@ -103,6 +103,11 @@ export function DrawerPanel({
   const lastSavedWidthRef = useRef<number>(0);
   const resizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingTimeoutsRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const searchQueryRef = useRef("");
+
+  useEffect(() => {
+    searchQueryRef.current = searchQuery;
+  }, [searchQuery]);
 
   const scheduleTimeout = useCallback((callback: () => void | Promise<void>, delayMs: number) => {
     const timeoutId = setTimeout(() => {
@@ -169,7 +174,7 @@ export function DrawerPanel({
   useEffect(() => {
     const unlisten = listen<{ mode: string; itemId?: string }>("postit_saved", async (event) => {
       // Refresh history when a postit is saved
-      await fetchHistory();
+      await fetchHistory({ searchQuery: searchQueryRef.current || undefined });
       const message = event.payload.mode === "edit" ? "수정되었습니다" : "메모가 생성되었습니다";
       setToast({ message, type: "success" });
     });
@@ -223,7 +228,9 @@ export function DrawerPanel({
   useEffect(() => {
     const unlisten = listen<ClipboardChangedPayload>("clipboard_changed", () => {
       clearTimeout(clipboardDebounceRef.current);
-      clipboardDebounceRef.current = setTimeout(() => fetchHistory(), 100);
+      clipboardDebounceRef.current = setTimeout(() => {
+        fetchHistory({ searchQuery: searchQueryRef.current || undefined });
+      }, 100);
     });
     return () => {
       clearTimeout(clipboardDebounceRef.current);
@@ -398,6 +405,7 @@ export function DrawerPanel({
   const handleSearch = useCallback(
     (query: string) => {
       setSearchQuery(query);
+      searchQueryRef.current = query;
       fetchHistory({ searchQuery: query || undefined });
     },
     [fetchHistory]
