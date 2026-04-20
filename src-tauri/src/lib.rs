@@ -304,7 +304,7 @@ pub fn run() {
                 })
             };
 
-            // Initialize and start hotkey monitoring (Cmd+C+C detection)
+            // Initialize and start global double-press hotkey monitoring.
             let hotkey_handle = app_handle.clone();
             let hotkey_manager = hotkey::HotkeyManager::new(hotkey_handle, startup_hotkey_interval_ms);
 
@@ -316,7 +316,7 @@ pub fn run() {
                     log::info!("Hotkey manager started successfully");
                 }
             } else {
-                log::warn!("Accessibility permission not granted. Cmd+C+C hotkey will not work.");
+                log::warn!("Accessibility permission not granted. Global hotkeys will not work.");
                 log::info!("Please grant accessibility permission in System Settings > Privacy & Security > Accessibility");
             }
 

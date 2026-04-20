@@ -4,6 +4,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 static LAST_CMD_C_TIME: AtomicU64 = AtomicU64::new(0);
 static LAST_CMD_E_TIME: AtomicU64 = AtomicU64::new(0);
+static LAST_OPTION_TIME: AtomicU64 = AtomicU64::new(0);
 static HOTKEY_ENABLED: AtomicBool = AtomicBool::new(false);
 static DOUBLE_PRESS_INTERVAL_MS: AtomicU64 = AtomicU64::new(500);
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
@@ -13,6 +14,37 @@ static EVENT_TAP_PTR: AtomicUsize = AtomicUsize::new(0);
 static EVENT_RUN_LOOP_PTR: AtomicUsize = AtomicUsize::new(0);
 
 const DEFAULT_DOUBLE_PRESS_INTERVAL_MS: u64 = 500;
+const KEY_DOWN_EVENT_TYPE: u32 = 10;
+const FLAGS_CHANGED_EVENT_TYPE: u32 = 12;
+const KEY_C: i64 = 8;
+const KEY_E: i64 = 14;
+const KEY_LEFT_OPTION: i64 = 58;
+const KEY_RIGHT_OPTION: i64 = 61;
+const K_CG_EVENT_FLAG_MASK_COMMAND: u64 = 0x00100000;
+const K_CG_EVENT_FLAG_MASK_CONTROL: u64 = 0x00040000;
+const K_CG_EVENT_FLAG_MASK_SHIFT: u64 = 0x00020000;
+const K_CG_EVENT_FLAG_MASK_OPTION: u64 = 0x00080000;
+
+fn is_option_modifier_keycode(keycode: i64) -> bool {
+    matches!(keycode, KEY_LEFT_OPTION | KEY_RIGHT_OPTION)
+}
+
+fn is_option_press_event(event_type: u32, keycode: i64, flags: u64) -> bool {
+    let has_disallowed_modifiers = flags
+        & (K_CG_EVENT_FLAG_MASK_COMMAND
+            | K_CG_EVENT_FLAG_MASK_CONTROL
+            | K_CG_EVENT_FLAG_MASK_SHIFT)
+        != 0;
+
+    event_type == FLAGS_CHANGED_EVENT_TYPE
+        && is_option_modifier_keycode(keycode)
+        && (flags & K_CG_EVENT_FLAG_MASK_OPTION) != 0
+        && !has_disallowed_modifiers
+}
+
+fn is_within_double_press_interval(last_time: u64, now: u64, interval: u64) -> bool {
+    last_time > 0 && now.saturating_sub(last_time) < interval
+}
 
 fn resolve_restored_window_size(
     monitor_logical_width: i32,
@@ -138,7 +170,12 @@ pub fn show_window_at_position(window: &tauri::WebviewWindow) {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_restored_window_size;
+    use super::{
+        is_option_press_event, is_within_double_press_interval, resolve_restored_window_size,
+        FLAGS_CHANGED_EVENT_TYPE, KEY_DOWN_EVENT_TYPE, KEY_LEFT_OPTION, KEY_RIGHT_OPTION,
+        K_CG_EVENT_FLAG_MASK_COMMAND, K_CG_EVENT_FLAG_MASK_CONTROL, K_CG_EVENT_FLAG_MASK_OPTION,
+        K_CG_EVENT_FLAG_MASK_SHIFT,
+    };
 
     #[test]
     fn resolve_restored_window_size_prefers_saved_width_and_preserves_height() {
@@ -162,6 +199,51 @@ mod tests {
             resolve_restored_window_size(1920, Some((1400, 999)), None),
             (1344, 760)
         );
+    }
+
+    #[test]
+    fn option_press_event_accepts_left_and_right_option_double_taps() {
+        assert!(is_option_press_event(
+            FLAGS_CHANGED_EVENT_TYPE,
+            KEY_LEFT_OPTION,
+            K_CG_EVENT_FLAG_MASK_OPTION
+        ));
+        assert!(is_option_press_event(
+            FLAGS_CHANGED_EVENT_TYPE,
+            KEY_RIGHT_OPTION,
+            K_CG_EVENT_FLAG_MASK_OPTION
+        ));
+    }
+
+    #[test]
+    fn option_press_event_rejects_wrong_event_type_or_extra_modifiers() {
+        assert!(!is_option_press_event(
+            KEY_DOWN_EVENT_TYPE,
+            KEY_LEFT_OPTION,
+            K_CG_EVENT_FLAG_MASK_OPTION
+        ));
+        assert!(!is_option_press_event(
+            FLAGS_CHANGED_EVENT_TYPE,
+            KEY_LEFT_OPTION,
+            K_CG_EVENT_FLAG_MASK_OPTION | K_CG_EVENT_FLAG_MASK_COMMAND
+        ));
+        assert!(!is_option_press_event(
+            FLAGS_CHANGED_EVENT_TYPE,
+            KEY_LEFT_OPTION,
+            K_CG_EVENT_FLAG_MASK_OPTION | K_CG_EVENT_FLAG_MASK_CONTROL
+        ));
+        assert!(!is_option_press_event(
+            FLAGS_CHANGED_EVENT_TYPE,
+            KEY_LEFT_OPTION,
+            K_CG_EVENT_FLAG_MASK_OPTION | K_CG_EVENT_FLAG_MASK_SHIFT
+        ));
+    }
+
+    #[test]
+    fn double_press_interval_requires_previous_press_within_threshold() {
+        assert!(is_within_double_press_interval(1_000, 1_320, 400));
+        assert!(!is_within_double_press_interval(0, 1_320, 400));
+        assert!(!is_within_double_press_interval(1_000, 1_500, 400));
     }
 }
 
@@ -193,16 +275,6 @@ mod macos {
     use std::ffi::c_void;
     use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    // Key codes on macOS
-    const KEY_C: i64 = 8;
-    const KEY_E: i64 = 14;
-    const KEY_V: i64 = 9;
-
-    // CGEventFlags
-    const K_CG_EVENT_FLAG_MASK_COMMAND: u64 = 0x00100000;
-    const K_CG_EVENT_FLAG_MASK_SHIFT: u64 = 0x00020000;
-    const K_CG_EVENT_FLAG_MASK_OPTION: u64 = 0x00080000;
 
     // CGEventTap types
     type CGEventRef = *mut c_void;
@@ -251,6 +323,9 @@ mod macos {
         // Store app handle for callback use
         APP_HANDLE.get_or_init(|| app_handle);
         DOUBLE_PRESS_INTERVAL_MS.store(interval_ms, Ordering::SeqCst);
+        LAST_CMD_C_TIME.store(0, Ordering::SeqCst);
+        LAST_CMD_E_TIME.store(0, Ordering::SeqCst);
+        LAST_OPTION_TIME.store(0, Ordering::SeqCst);
         HOTKEY_ENABLED.store(true, Ordering::SeqCst);
 
         // Spawn a thread for the event tap
@@ -264,6 +339,9 @@ mod macos {
 
     pub fn stop_event_tap() {
         HOTKEY_ENABLED.store(false, Ordering::SeqCst);
+        LAST_CMD_C_TIME.store(0, Ordering::SeqCst);
+        LAST_CMD_E_TIME.store(0, Ordering::SeqCst);
+        LAST_OPTION_TIME.store(0, Ordering::SeqCst);
 
         let tap_ptr = EVENT_TAP_PTR.swap(0, Ordering::SeqCst) as *mut c_void;
         if !tap_ptr.is_null() {
@@ -290,10 +368,7 @@ mod macos {
             return event;
         }
 
-        // CGEventType::KeyDown is 10
-        const CG_EVENT_KEY_DOWN: u32 = 10;
-
-        if event_type != CG_EVENT_KEY_DOWN {
+        if event_type != KEY_DOWN_EVENT_TYPE && event_type != FLAGS_CHANGED_EVENT_TYPE {
             return event;
         }
 
@@ -301,12 +376,41 @@ mod macos {
             let keycode = CGEventGetIntegerValueField(event, K_CG_KEYBOARD_EVENT_KEYCODE);
             let flags = CGEventGetFlags(event);
 
+            if is_option_press_event(event_type, keycode, flags) {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                let interval = DOUBLE_PRESS_INTERVAL_MS.load(Ordering::SeqCst);
+                let last_time = LAST_OPTION_TIME.swap(now, Ordering::SeqCst);
+
+                LAST_CMD_C_TIME.store(0, Ordering::SeqCst);
+                LAST_CMD_E_TIME.store(0, Ordering::SeqCst);
+
+                if is_within_double_press_interval(last_time, now, interval) {
+                    log::info!("Double Option detected! Interval: {}ms", now - last_time);
+                    LAST_OPTION_TIME.store(0, Ordering::SeqCst);
+
+                    crate::commands::clipboard::save_frontmost_app();
+                    thread::spawn(|| {
+                        trigger_show_history();
+                    });
+                }
+
+                return event;
+            }
+
+            if event_type == FLAGS_CHANGED_EVENT_TYPE {
+                if !is_option_modifier_keycode(keycode) {
+                    LAST_OPTION_TIME.store(0, Ordering::SeqCst);
+                }
+                return event;
+            }
+
             let is_cmd_pressed = (flags & K_CG_EVENT_FLAG_MASK_COMMAND) != 0;
             let is_shift_pressed = (flags & K_CG_EVENT_FLAG_MASK_SHIFT) != 0;
-            let is_option_pressed = (flags & K_CG_EVENT_FLAG_MASK_OPTION) != 0;
             let is_c_key = keycode == KEY_C;
             let is_e_key = keycode == KEY_E;
-            let is_v_key = keycode == KEY_V;
 
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -315,23 +419,7 @@ mod macos {
 
             let interval = DOUBLE_PRESS_INTERVAL_MS.load(Ordering::SeqCst);
 
-            // Cmd+Option+V detected - show clipboard history
-            if is_cmd_pressed && is_option_pressed && is_v_key {
-                log::info!("Cmd+Option+V detected! Showing clipboard history");
-
-                // Reset timers to prevent interference
-                LAST_CMD_C_TIME.store(0, Ordering::SeqCst);
-                LAST_CMD_E_TIME.store(0, Ordering::SeqCst);
-
-                // Save the frontmost app before our popup steals focus
-                crate::commands::clipboard::save_frontmost_app();
-
-                thread::spawn(|| {
-                    trigger_show_history();
-                });
-
-                return event;
-            }
+            LAST_OPTION_TIME.store(0, Ordering::SeqCst);
 
             // Cmd+C detected - check for double-press for Translation
             if is_cmd_pressed && !is_shift_pressed && is_c_key {
@@ -340,7 +428,7 @@ mod macos {
                 // Reset E timer to prevent cross-triggering
                 LAST_CMD_E_TIME.store(0, Ordering::SeqCst);
 
-                if last_time > 0 && (now - last_time) < interval {
+                if is_within_double_press_interval(last_time, now, interval) {
                     log::info!("Double Cmd+C detected! Interval: {}ms", now - last_time);
 
                     // Reset the timer to prevent triple-press triggers
@@ -363,7 +451,7 @@ mod macos {
                 // Reset C timer to prevent cross-triggering
                 LAST_CMD_C_TIME.store(0, Ordering::SeqCst);
 
-                if last_time > 0 && (now - last_time) < interval {
+                if is_within_double_press_interval(last_time, now, interval) {
                     log::info!("Double Cmd+E detected! Interval: {}ms", now - last_time);
 
                     // Reset the timer to prevent triple-press triggers
@@ -385,8 +473,9 @@ mod macos {
 
     fn run_event_tap() {
         unsafe {
-            // CGEventMaskBit for KeyDown (10) = 1 << 10 = 1024
-            let event_mask: u64 = 1 << 10;
+            // Listen to KeyDown and FlagsChanged so we can detect Cmd/C/E keydowns
+            // and double-taps of modifier-only keys such as Option.
+            let event_mask: u64 = (1 << KEY_DOWN_EVENT_TYPE) | (1 << FLAGS_CHANGED_EVENT_TYPE);
 
             let tap = CGEventTapCreate(
                 CGEventTapLocation::HID as u32,

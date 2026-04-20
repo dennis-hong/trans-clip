@@ -129,7 +129,7 @@ function App() {
   // Note: Keyboard shortcuts for monitor switching are handled in DrawerPanel.tsx
   // to avoid duplicate calls and to update the currentMonitor state
 
-  // Listen for double copy events (Cmd+CC for translation)
+  // Listen for double copy events (Cmd+C+C for translation)
   useEffect(() => {
     const unlisten = listen<DoubleCopyPayload>("double_copy_detected", (event) => {
       const { text } = event.payload;
@@ -144,7 +144,7 @@ function App() {
     };
   }, []);
 
-  // Listen for polish events (Cmd+EE for polishing)
+  // Listen for polish events (Cmd+E+E for polishing)
   useEffect(() => {
     const unlisten = listen<PolishPayload>("polish_detected", (event) => {
       const { text } = event.payload;
@@ -159,7 +159,7 @@ function App() {
     };
   }, []);
 
-  // Listen for show_history events (Cmd+Option+V or tray click)
+  // Listen for show_history events (double Option or tray click)
   useEffect(() => {
     const unlisten = listen<ShowHistoryPayload>("show_history", () => {
       setPopupMode("history");

@@ -186,9 +186,10 @@ export function SettingsPanel() {
         >
           <div className="space-y-2">
             <label className="block text-xs font-medium text-green-700">
-              더블 프레스 인터벌: {settings.doublePressInterval}ms
+              연타 감지 간격: {settings.doublePressInterval}ms
             </label>
             <input
+              aria-label="연타 감지 간격"
               type="range"
               min="200"
               max="1000"
@@ -199,8 +200,27 @@ export function SettingsPanel() {
               disabled={isLoading}
             />
             <p className="text-[10px] text-green-600">
-              ⌘C⌘C 감지 시간 간격
+              ⌥⌥, ⌘C⌘C, ⌘E⌘E 감지 시간
             </p>
+            <div className="rounded-md border border-green-200 bg-white/70 p-2">
+              <p className="text-[10px] font-medium text-green-700">
+                현재 단축키
+              </p>
+              <div className="mt-2 space-y-1 text-[10px] text-green-700">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-mono">⌥⌥</span>
+                  <span>창 열기 / 숨기기</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-mono">⌘C⌘C</span>
+                  <span>선택 텍스트 번역</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-mono">⌘E⌘E</span>
+                  <span>선택 텍스트 다듬기</span>
+                </div>
+              </div>
+            </div>
           </div>
         </SettingsCard>
 
@@ -310,7 +330,7 @@ export function SettingsPanel() {
               )}
             </div>
             <p className="text-[10px] text-gray-500">
-              ⌘C⌘C 감지에 필요합니다
+              전역 단축키 감지에 필요합니다
             </p>
           </div>
         </SettingsCard>
