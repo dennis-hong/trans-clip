@@ -422,14 +422,12 @@ pub fn run() {
             label,
             event: WindowEvent::CloseRequested { api, .. },
             ..
-        } => {
+        } if label == "main" => {
             // When close button is clicked, hide the window instead of destroying it
-            if label == "main" {
-                api.prevent_close();
-                if let Some(window) = app_handle.get_webview_window("main") {
-                    if let Err(err) = window.hide() {
-                        log::warn!("Failed to hide main window on close request: {}", err);
-                    }
+            api.prevent_close();
+            if let Some(window) = app_handle.get_webview_window("main") {
+                if let Err(err) = window.hide() {
+                    log::warn!("Failed to hide main window on close request: {}", err);
                 }
             }
         }
