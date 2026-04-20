@@ -54,7 +54,9 @@ pub fn set_double_press_interval(interval_ms: u64) {
 /// If that monitor is no longer present after hotplug changes, fall back to
 /// the cursor monitor and then the primary monitor.
 pub fn show_window_at_position(window: &tauri::WebviewWindow) {
-    use crate::utils::monitor::{generate_monitor_key, sort_monitors_by_position};
+    use crate::utils::monitor::{
+        generate_monitor_key, get_logical_bounds, sort_monitors_by_position,
+    };
 
     // Calculate and set position before showing
     if let Ok(monitors) = window.app_handle().available_monitors() {
@@ -63,12 +65,9 @@ pub fn show_window_at_position(window: &tauri::WebviewWindow) {
             crate::commands::window::resolve_last_used_monitor(window.app_handle(), &sorted);
 
         if let Some((monitor_index, monitor)) = resolved_monitor {
-            let mon_pos = monitor.position();
             let mon_size = monitor.size();
             let scale = monitor.scale_factor();
-
-            let mon_logical_width = (mon_size.width as f64 / scale) as i32;
-            let mon_logical_height = (mon_size.height as f64 / scale) as i32;
+            let bounds = get_logical_bounds(monitor);
             let monitor_key = generate_monitor_key(mon_size.width, mon_size.height, scale);
             let current_logical_size = get_current_logical_window_size(window);
             let saved_width =
@@ -92,10 +91,10 @@ pub fn show_window_at_position(window: &tauri::WebviewWindow) {
                     });
 
             let (win_width, win_height) =
-                resolve_restored_window_size(mon_logical_width, current_logical_size, saved_width);
+                resolve_restored_window_size(bounds.width, current_logical_size, saved_width);
 
-            let x = mon_pos.x + (mon_logical_width - win_width) / 2;
-            let y = mon_pos.y + mon_logical_height - win_height;
+            let x = bounds.x + (bounds.width - win_width) / 2;
+            let y = bounds.y + bounds.height - win_height;
 
             if let Err(err) = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
                 width: win_width as f64,

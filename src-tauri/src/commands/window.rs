@@ -212,17 +212,12 @@ fn find_monitor_index_from_cursor(
 
         // Fallback: try with logical coordinates directly (for single-scale setups)
         for (idx, monitor) in sorted_monitors.iter().enumerate() {
-            let mon_pos = monitor.position();
-            let mon_size = monitor.size();
-            let scale = monitor.scale_factor();
+            let bounds = get_logical_bounds(monitor);
 
-            let mon_logical_width = (mon_size.width as f64 / scale) as i32;
-            let mon_logical_height = (mon_size.height as f64 / scale) as i32;
-
-            if cursor_x >= mon_pos.x
-                && cursor_x < mon_pos.x + mon_logical_width
-                && cursor_y >= mon_pos.y
-                && cursor_y < mon_pos.y + mon_logical_height
+            if cursor_x >= bounds.x
+                && cursor_x < bounds.x + bounds.width
+                && cursor_y >= bounds.y
+                && cursor_y < bounds.y + bounds.height
             {
                 log::info!("Cursor is on monitor {} (logical fallback)", idx);
                 return Some(idx);
@@ -380,13 +375,9 @@ pub async fn move_to_monitor(
     // Get target monitor info
     let target_monitor = sorted_monitors[monitor_index];
     remember_last_monitor(monitor_index, target_monitor);
-    let mon_pos = target_monitor.position();
     let mon_size = target_monitor.size();
     let target_scale = target_monitor.scale_factor();
-
-    // Convert target monitor size to logical
-    let mon_logical_width = (mon_size.width as f64 / target_scale) as i32;
-    let mon_logical_height = (mon_size.height as f64 / target_scale) as i32;
+    let bounds = get_logical_bounds(target_monitor);
 
     // Generate monitor key for this monitor
     let monitor_key = generate_monitor_key(mon_size.width, mon_size.height, target_scale);
@@ -404,12 +395,12 @@ pub async fn move_to_monitor(
             saved_width
         }
         _ => {
-            let adaptive_width = calculate_adaptive_width(mon_logical_width);
+            let adaptive_width = calculate_adaptive_width(bounds.width);
             log::info!(
                 "Using adaptive width for monitor {}: {} (monitor logical width: {})",
                 monitor_key,
                 adaptive_width,
-                mon_logical_width
+                bounds.width
             );
             adaptive_width
         }
@@ -422,8 +413,8 @@ pub async fn move_to_monitor(
 
     if scale_differs {
         // Two-phase move: first move to target monitor center to update scale factor
-        let temp_x = mon_pos.x + mon_logical_width / 2;
-        let temp_y = mon_pos.y + mon_logical_height / 2;
+        let temp_x = bounds.x + bounds.width / 2;
+        let temp_y = bounds.y + bounds.height / 2;
 
         log::info!(
             "Scale differs ({} -> {}), moving to target monitor first",
@@ -463,33 +454,33 @@ pub async fn move_to_monitor(
     log::info!(
         "Target monitor[{}]: pos=({}, {}), logical size={}x{}, scale={}",
         monitor_index,
-        mon_pos.x,
-        mon_pos.y,
-        mon_logical_width,
-        mon_logical_height,
+        bounds.x,
+        bounds.y,
+        bounds.width,
+        bounds.height,
         target_scale
     );
 
     // Calculate final position based on anchor using logical coordinates
     let (x, y) = match anchor.as_str() {
         "bottom" => {
-            let x = mon_pos.x + (mon_logical_width - target_width) / 2;
-            let y = mon_pos.y + mon_logical_height - win_logical_height;
+            let x = bounds.x + (bounds.width - target_width) / 2;
+            let y = bounds.y + bounds.height - win_logical_height;
             (x, y)
         }
         "top" => {
-            let x = mon_pos.x + (mon_logical_width - target_width) / 2;
-            let y = mon_pos.y;
+            let x = bounds.x + (bounds.width - target_width) / 2;
+            let y = bounds.y;
             (x, y)
         }
         "center" => {
-            let x = mon_pos.x + (mon_logical_width - target_width) / 2;
-            let y = mon_pos.y + (mon_logical_height - win_logical_height) / 2;
+            let x = bounds.x + (bounds.width - target_width) / 2;
+            let y = bounds.y + (bounds.height - win_logical_height) / 2;
             (x, y)
         }
         _ => {
-            let x = mon_pos.x + (mon_logical_width - target_width) / 2;
-            let y = mon_pos.y + mon_logical_height - win_logical_height;
+            let x = bounds.x + (bounds.width - target_width) / 2;
+            let y = bounds.y + bounds.height - win_logical_height;
             (x, y)
         }
     };
@@ -676,13 +667,8 @@ pub async fn snap_to_bottom(app: tauri::AppHandle) -> Result<(), String> {
     let mut found_index = 0usize;
 
     for (sorted_index, monitor) in sorted_monitors.iter().enumerate() {
-        let mon_pos = monitor.position();
-        let mon_size = monitor.size();
         let scale = monitor.scale_factor();
-
-        // Convert to logical coordinates for comparison
-        let mon_logical_width = (mon_size.width as f64 / scale) as i32;
-        let mon_logical_height = (mon_size.height as f64 / scale) as i32;
+        let bounds = get_logical_bounds(monitor);
 
         // win_pos is already in physical pixels, convert to logical
         let win_logical_x = (win_pos.x as f64 / scale) as i32;
@@ -693,10 +679,10 @@ pub async fn snap_to_bottom(app: tauri::AppHandle) -> Result<(), String> {
         let win_center_x = win_logical_x + win_logical_width / 2;
         let win_center_y = win_logical_y + win_logical_height / 2;
 
-        if win_center_x >= mon_pos.x
-            && win_center_x < mon_pos.x + mon_logical_width
-            && win_center_y >= mon_pos.y
-            && win_center_y < mon_pos.y + mon_logical_height
+        if win_center_x >= bounds.x
+            && win_center_x < bounds.x + bounds.width
+            && win_center_y >= bounds.y
+            && win_center_y < bounds.y + bounds.height
         {
             target_monitor = *monitor;
             found_index = sorted_index;
@@ -706,17 +692,15 @@ pub async fn snap_to_bottom(app: tauri::AppHandle) -> Result<(), String> {
 
     remember_last_monitor(found_index, target_monitor);
 
-    let mon_pos = target_monitor.position();
-    let mon_size = target_monitor.size();
     let scale = target_monitor.scale_factor();
+    let bounds = get_logical_bounds(target_monitor);
 
     // Convert to logical coordinates
-    let mon_logical_height = (mon_size.height as f64 / scale) as i32;
     let win_logical_x = (win_pos.x as f64 / scale) as i32;
     let win_logical_height = (win_size.height as f64 / scale) as i32;
 
     // Keep x position, snap y to bottom (using logical coordinates)
-    let new_y = mon_pos.y + mon_logical_height - win_logical_height;
+    let new_y = bounds.y + bounds.height - win_logical_height;
 
     window
         .set_position(tauri::Position::Logical(tauri::LogicalPosition {
@@ -747,13 +731,8 @@ pub async fn snap_to_edge(app: tauri::AppHandle, threshold: i32) -> Result<SnapR
 
     // Determine which monitor the window is on based on window center
     for (sorted_index, monitor) in sorted_monitors.iter().enumerate() {
-        let mon_pos = monitor.position();
-        let mon_size = monitor.size();
         let scale = monitor.scale_factor();
-
-        // Convert to logical coordinates for comparison
-        let mon_logical_width = (mon_size.width as f64 / scale) as i32;
-        let mon_logical_height = (mon_size.height as f64 / scale) as i32;
+        let bounds = get_logical_bounds(monitor);
 
         // win_pos is in physical pixels, convert to logical
         let win_logical_x = (win_pos.x as f64 / scale) as i32;
@@ -764,10 +743,10 @@ pub async fn snap_to_edge(app: tauri::AppHandle, threshold: i32) -> Result<SnapR
         let win_center_x = win_logical_x + win_logical_width / 2;
         let win_center_y = win_logical_y + win_logical_height / 2;
 
-        if win_center_x >= mon_pos.x
-            && win_center_x < mon_pos.x + mon_logical_width
-            && win_center_y >= mon_pos.y
-            && win_center_y < mon_pos.y + mon_logical_height
+        if win_center_x >= bounds.x
+            && win_center_x < bounds.x + bounds.width
+            && win_center_y >= bounds.y
+            && win_center_y < bounds.y + bounds.height
         {
             target_monitor = *monitor;
             found_index = sorted_index;
@@ -777,13 +756,10 @@ pub async fn snap_to_edge(app: tauri::AppHandle, threshold: i32) -> Result<SnapR
 
     remember_last_monitor(found_index, target_monitor);
 
-    let mon_pos = target_monitor.position();
-    let mon_size = target_monitor.size();
     let scale = target_monitor.scale_factor();
+    let bounds = get_logical_bounds(target_monitor);
 
     // Convert all measurements to logical coordinates
-    let mon_logical_width = (mon_size.width as f64 / scale) as i32;
-    let mon_logical_height = (mon_size.height as f64 / scale) as i32;
     let win_logical_x = (win_pos.x as f64 / scale) as i32;
     let win_logical_y = (win_pos.y as f64 / scale) as i32;
     let win_logical_width = (win_size.width as f64 / scale) as i32;
@@ -795,16 +771,16 @@ pub async fn snap_to_edge(app: tauri::AppHandle, threshold: i32) -> Result<SnapR
         let menu_bar_height = 25;
         let dock_height = 70;
         (
-            mon_pos.y + menu_bar_height,
-            mon_pos.y + mon_logical_height - dock_height,
+            bounds.y + menu_bar_height,
+            bounds.y + bounds.height - dock_height,
         )
     };
 
     #[cfg(not(target_os = "macos"))]
-    let (work_top, work_bottom) = (mon_pos.y, mon_pos.y + mon_logical_height);
+    let (work_top, work_bottom) = (bounds.y, bounds.y + bounds.height);
 
-    let work_left = mon_pos.x;
-    let work_right = mon_pos.x + mon_logical_width;
+    let work_left = bounds.x;
+    let work_right = bounds.x + bounds.width;
 
     // Calculate distances to each edge
     let dist_to_top = win_logical_y - work_top;
@@ -918,20 +894,17 @@ pub async fn set_drawer_mode(
         let mut found_monitor = sorted_monitors[0];
 
         for (idx, monitor) in sorted_monitors.iter().enumerate() {
-            let mon_pos = monitor.position();
-            let mon_size = monitor.size();
-            let scale = monitor.scale_factor();
-            let mon_logical_width = (mon_size.width as f64 / scale) as i32;
+            let bounds = get_logical_bounds(monitor);
 
             // Check if current_x is within this monitor's horizontal bounds
-            if current_x >= mon_pos.x && current_x < mon_pos.x + mon_logical_width {
+            if current_x >= bounds.x && current_x < bounds.x + bounds.width {
                 found_idx = idx;
                 found_monitor = *monitor;
                 break;
             }
 
             // If X is past this monitor, this monitor becomes the candidate
-            if current_x >= mon_pos.x {
+            if current_x >= bounds.x {
                 found_idx = idx;
                 found_monitor = *monitor;
             }
@@ -950,16 +923,12 @@ pub async fn set_drawer_mode(
 
     remember_last_monitor(monitor_index, target_monitor);
 
-    let mon_pos = target_monitor.position();
-    let mon_size = target_monitor.size();
-    let scale = target_monitor.scale_factor();
-
-    // Convert monitor size to logical coordinates
-    let mon_logical_width = (mon_size.width as f64 / scale) as i32;
-    let mon_logical_height = (mon_size.height as f64 / scale) as i32;
+    let bounds = get_logical_bounds(target_monitor);
 
     // Generate monitor key for this monitor
-    let monitor_key = generate_monitor_key(mon_size.width, mon_size.height, scale);
+    let monitor_size = target_monitor.size();
+    let scale = target_monitor.scale_factor();
+    let monitor_key = generate_monitor_key(monitor_size.width, monitor_size.height, scale);
 
     // Get saved width for this monitor or calculate adaptive width
     let db = &state.db;
@@ -973,7 +942,7 @@ pub async fn set_drawer_mode(
             w
         }
         _ => {
-            let adaptive = calculate_adaptive_width(mon_logical_width);
+            let adaptive = calculate_adaptive_width(bounds.width);
             log::info!(
                 "set_drawer_mode: Using adaptive width {} for monitor {}",
                 adaptive,
@@ -984,7 +953,7 @@ pub async fn set_drawer_mode(
     };
     // Set new height based on mode
     let popup_min_height = 350;
-    let popup_max_height = ((mon_logical_height as f64 * 0.72).round() as i32).min(760);
+    let popup_max_height = ((bounds.height as f64 * 0.72).round() as i32).min(760);
     let popup_max_height = popup_max_height.max(popup_min_height);
     let new_logical_height = match mode.as_str() {
         "collapsed" => 48, // Just header
@@ -1007,14 +976,14 @@ pub async fn set_drawer_mode(
     // Calculate position
     let new_x = if let Some(current_x) = current_logical_x {
         // Keep current X, but clamp to current monitor bounds
-        let min_x = mon_pos.x;
-        let max_x = mon_pos.x + mon_logical_width - saved_width;
+        let min_x = bounds.x;
+        let max_x = bounds.x + bounds.width - saved_width;
         current_x.clamp(min_x, max_x)
     } else {
         // Center horizontally on the monitor
-        mon_pos.x + (mon_logical_width - saved_width) / 2
+        bounds.x + (bounds.width - saved_width) / 2
     };
-    let new_y = mon_pos.y + mon_logical_height - new_logical_height;
+    let new_y = bounds.y + bounds.height - new_logical_height;
 
     window
         .set_position(tauri::Position::Logical(tauri::LogicalPosition {

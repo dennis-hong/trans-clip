@@ -39,21 +39,38 @@ pub fn calculate_adaptive_width(monitor_logical_width: i32) -> i32 {
 
 /// Get logical bounds of a monitor
 pub struct MonitorLogicalBounds {
+    pub x: i32,
+    pub y: i32,
     pub width: i32,
+    pub height: i32,
+}
+
+pub fn get_logical_bounds_from_raw(
+    position_x: i32,
+    position_y: i32,
+    width: u32,
+    height: u32,
+    scale: f64,
+) -> MonitorLogicalBounds {
+    MonitorLogicalBounds {
+        x: (position_x as f64 / scale) as i32,
+        y: (position_y as f64 / scale) as i32,
+        width: (width as f64 / scale) as i32,
+        height: (height as f64 / scale) as i32,
+    }
 }
 
 pub fn get_logical_bounds(monitor: &Monitor) -> MonitorLogicalBounds {
     let size = monitor.size();
+    let position = monitor.position();
     let scale = monitor.scale_factor();
 
-    MonitorLogicalBounds {
-        width: (size.width as f64 / scale) as i32,
-    }
+    get_logical_bounds_from_raw(position.x, position.y, size.width, size.height, scale)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{calculate_adaptive_width, generate_monitor_key};
+    use super::{calculate_adaptive_width, generate_monitor_key, get_logical_bounds_from_raw};
 
     #[test]
     fn calculate_adaptive_width_respects_breakpoints_and_clamps() {
@@ -67,5 +84,14 @@ mod tests {
     fn generate_monitor_key_is_stable() {
         let key = generate_monitor_key(3024, 1964, 2.0);
         assert_eq!(key, "3024x1964@2.00");
+    }
+
+    #[test]
+    fn get_logical_bounds_from_raw_converts_origin_and_size() {
+        let bounds = get_logical_bounds_from_raw(3024, 0, 3024, 1964, 2.0);
+        assert_eq!(bounds.x, 1512);
+        assert_eq!(bounds.y, 0);
+        assert_eq!(bounds.width, 1512);
+        assert_eq!(bounds.height, 982);
     }
 }
