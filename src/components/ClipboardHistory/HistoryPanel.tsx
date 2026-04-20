@@ -10,8 +10,13 @@ export function HistoryPanel() {
   const [searchQuery, setSearchQuery] = useState("");
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const latestSearchQueryRef = useRef("");
   const { items, isLoading, error, hasMore, fetchHistory, deleteItem, togglePin, clearAll } =
     useClipboardStore();
+
+  useEffect(() => {
+    latestSearchQueryRef.current = searchQuery;
+  }, [searchQuery]);
 
   useEffect(() => {
     fetchHistory();
@@ -22,7 +27,10 @@ export function HistoryPanel() {
   useEffect(() => {
     const unlisten = listen<ClipboardChangedPayload>("clipboard_changed", () => {
       clearTimeout(clipboardDebounceRef.current);
-      clipboardDebounceRef.current = setTimeout(() => fetchHistory(), 100);
+      clipboardDebounceRef.current = setTimeout(() => {
+        const activeQuery = latestSearchQueryRef.current || undefined;
+        fetchHistory({ searchQuery: activeQuery });
+      }, 100);
     });
 
     return () => {
