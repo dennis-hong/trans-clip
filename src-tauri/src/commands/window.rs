@@ -2,13 +2,18 @@ use crate::utils::monitor::{
     calculate_adaptive_width, generate_monitor_key, get_logical_bounds, sort_monitors_by_position,
 };
 use crate::AppState;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use tauri::{Emitter, Manager, State};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    LazyLock, Mutex,
+};
+use tauri::{Emitter, Manager, Monitor, State};
 
 use super::types::{CurrentMonitorInfo, MonitorInfo, SnapEdge, SnapResult, WindowPosition};
 
 // Store the last valid monitor index to preserve position across hide/show cycles
 static LAST_MONITOR_INDEX: AtomicUsize = AtomicUsize::new(0);
+static LAST_MONITOR_STATE: LazyLock<Mutex<Option<LastMonitorState>>> =
+    LazyLock::new(|| Mutex::new(None));
 const POSTIT_EDITOR_LABEL: &str = "postit-editor";
 
 #[derive(Clone, serde::Serialize)]
@@ -18,13 +23,135 @@ struct PostItEditorOpenPayload {
     item_id: Option<String>,
 }
 
-pub fn get_last_monitor_index() -> usize {
-    LAST_MONITOR_INDEX.load(Ordering::SeqCst)
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LastMonitorState {
+    signature: String,
+    monitor_key: String,
+    position_x: i32,
+    position_y: i32,
 }
 
-/// Update LAST_MONITOR_INDEX based on current mouse cursor position
-/// This is called before showing the window to ensure it appears on the correct monitor
-pub fn update_monitor_from_cursor(app: &tauri::AppHandle) {
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MonitorSelectionCandidate {
+    signature: String,
+    monitor_key: String,
+    position_x: i32,
+    position_y: i32,
+}
+
+fn generate_monitor_signature(monitor: &Monitor) -> String {
+    let size = monitor.size();
+    let name = monitor
+        .name()
+        .map(|value| value.to_string())
+        .unwrap_or_default();
+    format!(
+        "{}|{}x{}@{:.2}",
+        name,
+        size.width,
+        size.height,
+        monitor.scale_factor()
+    )
+}
+
+fn build_monitor_candidate(monitor: &Monitor) -> MonitorSelectionCandidate {
+    let size = monitor.size();
+    let position = monitor.position();
+    MonitorSelectionCandidate {
+        signature: generate_monitor_signature(monitor),
+        monitor_key: generate_monitor_key(size.width, size.height, monitor.scale_factor()),
+        position_x: position.x,
+        position_y: position.y,
+    }
+}
+
+fn resolve_saved_monitor_index(
+    saved_state: Option<&LastMonitorState>,
+    candidates: &[MonitorSelectionCandidate],
+) -> Option<usize> {
+    let saved_state = saved_state?;
+
+    let mut best_match = None;
+    let mut best_distance = i32::MAX;
+
+    for (index, candidate) in candidates.iter().enumerate() {
+        if candidate.signature == saved_state.signature {
+            let distance = (candidate.position_x - saved_state.position_x).abs()
+                + (candidate.position_y - saved_state.position_y).abs();
+
+            if distance < best_distance {
+                best_distance = distance;
+                best_match = Some(index);
+            }
+        }
+    }
+
+    if best_match.is_some() {
+        return best_match;
+    }
+
+    for (index, candidate) in candidates.iter().enumerate() {
+        if candidate.monitor_key != saved_state.monitor_key {
+            continue;
+        }
+
+        let distance = (candidate.position_x - saved_state.position_x).abs()
+            + (candidate.position_y - saved_state.position_y).abs();
+
+        if distance < best_distance {
+            best_distance = distance;
+            best_match = Some(index);
+        }
+    }
+
+    best_match
+}
+
+fn get_last_monitor_state() -> Option<LastMonitorState> {
+    match LAST_MONITOR_STATE.lock() {
+        Ok(state) => state.clone(),
+        Err(err) => {
+            log::warn!("Failed to read last-used monitor state: {}", err);
+            None
+        }
+    }
+}
+
+fn remember_last_monitor(index: usize, monitor: &Monitor) {
+    LAST_MONITOR_INDEX.store(index, Ordering::SeqCst);
+
+    let size = monitor.size();
+    let position = monitor.position();
+    let state = LastMonitorState {
+        signature: generate_monitor_signature(monitor),
+        monitor_key: generate_monitor_key(size.width, size.height, monitor.scale_factor()),
+        position_x: position.x,
+        position_y: position.y,
+    };
+
+    match LAST_MONITOR_STATE.lock() {
+        Ok(mut saved_state) => {
+            *saved_state = Some(state.clone());
+        }
+        Err(err) => {
+            log::warn!("Failed to update last-used monitor state: {}", err);
+        }
+    }
+
+    log::info!(
+        "Updated last-used monitor: index={}, signature={}, monitor_key={}, position=({}, {})",
+        index,
+        state.signature,
+        state.monitor_key,
+        state.position_x,
+        state.position_y
+    );
+}
+
+fn find_monitor_index_from_cursor(
+    app: &tauri::AppHandle,
+    sorted_monitors: &[&Monitor],
+) -> Option<usize> {
     #[cfg(target_os = "macos")]
     {
         use core_graphics::event::CGEvent;
@@ -35,14 +162,14 @@ pub fn update_monitor_from_cursor(app: &tauri::AppHandle) {
             Ok(s) => s,
             Err(_) => {
                 log::warn!("Failed to create event source for cursor position");
-                return;
+                return None;
             }
         };
         let event = match CGEvent::new(source) {
             Ok(e) => e,
             Err(_) => {
                 log::warn!("Failed to create event for cursor position");
-                return;
+                return None;
             }
         };
         let cursor_pos = event.location();
@@ -56,11 +183,11 @@ pub fn update_monitor_from_cursor(app: &tauri::AppHandle) {
             Ok(m) => m,
             Err(e) => {
                 log::error!("Failed to get monitors: {}", e);
-                return;
+                return None;
             }
         };
 
-        let sorted_monitors = sort_monitors_by_position(monitors.iter());
+        let _ = monitors;
 
         // Find which monitor contains the cursor
         for (idx, monitor) in sorted_monitors.iter().enumerate() {
@@ -79,8 +206,7 @@ pub fn update_monitor_from_cursor(app: &tauri::AppHandle) {
                 && cursor_physical_y < mon_pos.y + mon_size.height as i32
             {
                 log::info!("Cursor is on monitor {} (sorted index)", idx);
-                LAST_MONITOR_INDEX.store(idx, Ordering::SeqCst);
-                return;
+                return Some(idx);
             }
         }
 
@@ -99,19 +225,65 @@ pub fn update_monitor_from_cursor(app: &tauri::AppHandle) {
                 && cursor_y < mon_pos.y + mon_logical_height
             {
                 log::info!("Cursor is on monitor {} (logical fallback)", idx);
-                LAST_MONITOR_INDEX.store(idx, Ordering::SeqCst);
-                return;
+                return Some(idx);
             }
         }
 
         log::warn!("Could not determine monitor from cursor position");
+        None
     }
 
     #[cfg(not(target_os = "macos"))]
     {
         let _ = app;
         log::info!("Cursor-based monitor detection not implemented for this platform");
+        None
     }
+}
+
+pub fn resolve_last_used_monitor<'a>(
+    app: &tauri::AppHandle,
+    sorted_monitors: &[&'a Monitor],
+) -> Option<(usize, &'a Monitor)> {
+    if sorted_monitors.is_empty() {
+        return None;
+    }
+
+    let candidates: Vec<_> = sorted_monitors
+        .iter()
+        .map(|monitor| build_monitor_candidate(monitor))
+        .collect();
+
+    if let Some(saved_index) =
+        resolve_saved_monitor_index(get_last_monitor_state().as_ref(), &candidates)
+    {
+        let monitor = *sorted_monitors.get(saved_index)?;
+        remember_last_monitor(saved_index, monitor);
+        return Some((saved_index, monitor));
+    }
+
+    if let Some(cursor_index) = find_monitor_index_from_cursor(app, sorted_monitors) {
+        let monitor = *sorted_monitors.get(cursor_index)?;
+        remember_last_monitor(cursor_index, monitor);
+        return Some((cursor_index, monitor));
+    }
+
+    if let Ok(Some(primary_monitor)) = app.primary_monitor() {
+        let primary_position = primary_monitor.position();
+        let primary_size = primary_monitor.size();
+
+        if let Some(primary_index) = sorted_monitors.iter().position(|monitor| {
+            monitor.position() == primary_position && monitor.size() == primary_size
+        }) {
+            let monitor = *sorted_monitors.get(primary_index)?;
+            remember_last_monitor(primary_index, monitor);
+            return Some((primary_index, monitor));
+        }
+    }
+
+    let fallback_monitor = *sorted_monitors.first()?;
+    remember_last_monitor(0, fallback_monitor);
+    Some((0, fallback_monitor))
 }
 
 #[tauri::command]
@@ -203,17 +375,11 @@ pub async fn move_to_monitor(
         return Err("Invalid monitor index".to_string());
     }
 
-    // Save the monitor index for later use
-    LAST_MONITOR_INDEX.store(monitor_index, Ordering::SeqCst);
-    log::info!(
-        "move_to_monitor: saved LAST_MONITOR_INDEX={}",
-        monitor_index
-    );
-
     let window = app.get_webview_window("main").ok_or("Window not found")?;
 
     // Get target monitor info
     let target_monitor = sorted_monitors[monitor_index];
+    remember_last_monitor(monitor_index, target_monitor);
     let mon_pos = target_monitor.position();
     let mon_size = target_monitor.size();
     let target_scale = target_monitor.scale_factor();
@@ -364,18 +530,16 @@ pub async fn get_current_monitor_index(app: tauri::AppHandle) -> Result<usize, S
             && win_center_y < mon_pos.y + mon_size.height as i32
         {
             // Update the saved monitor index
-            LAST_MONITOR_INDEX.store(sorted_index, Ordering::SeqCst);
+            remember_last_monitor(sorted_index, monitor);
             return Ok(sorted_index);
         }
     }
 
-    // Default to saved index or first monitor if not found
-    let saved_index = LAST_MONITOR_INDEX.load(Ordering::SeqCst);
-    if saved_index < sorted_monitors.len() {
-        Ok(saved_index)
-    } else {
-        Ok(0)
+    if let Some((saved_index, _)) = resolve_last_used_monitor(&app, &sorted_monitors) {
+        return Ok(saved_index);
     }
+
+    Ok(0)
 }
 
 #[tauri::command]
@@ -540,9 +704,7 @@ pub async fn snap_to_bottom(app: tauri::AppHandle) -> Result<(), String> {
         }
     }
 
-    // Update the saved monitor index
-    LAST_MONITOR_INDEX.store(found_index, Ordering::SeqCst);
-    log::info!("snap_to_bottom: updated LAST_MONITOR_INDEX={}", found_index);
+    remember_last_monitor(found_index, target_monitor);
 
     let mon_pos = target_monitor.position();
     let mon_size = target_monitor.size();
@@ -613,9 +775,7 @@ pub async fn snap_to_edge(app: tauri::AppHandle, threshold: i32) -> Result<SnapR
         }
     }
 
-    // Update the saved monitor index
-    LAST_MONITOR_INDEX.store(found_index, Ordering::SeqCst);
-    log::info!("snap_to_edge: updated LAST_MONITOR_INDEX={}", found_index);
+    remember_last_monitor(found_index, target_monitor);
 
     let mon_pos = target_monitor.position();
     let mon_size = target_monitor.size();
@@ -784,22 +944,11 @@ pub async fn set_drawer_mode(
         );
         (found_idx, found_monitor)
     } else {
-        // Window is not visible - use saved monitor index
-        let saved_index = LAST_MONITOR_INDEX.load(Ordering::SeqCst);
-        let idx = if saved_index < sorted_monitors.len() {
-            saved_index
-        } else {
-            0
-        };
-        log::info!(
-            "set_drawer_mode: window not visible, using saved monitor index={}",
-            idx
-        );
-        (idx, sorted_monitors[idx])
+        // Window is not visible - restore the last-used monitor when available.
+        resolve_last_used_monitor(&app, &sorted_monitors).unwrap_or((0, sorted_monitors[0]))
     };
 
-    // Update LAST_MONITOR_INDEX
-    LAST_MONITOR_INDEX.store(monitor_index, Ordering::SeqCst);
+    remember_last_monitor(monitor_index, target_monitor);
 
     let mon_pos = target_monitor.position();
     let mon_size = target_monitor.size();
@@ -888,6 +1037,125 @@ pub async fn set_drawer_mode(
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_saved_monitor_index, LastMonitorState, MonitorSelectionCandidate};
+
+    #[test]
+    fn resolve_saved_monitor_index_matches_saved_signature_after_reorder() {
+        let saved_state = LastMonitorState {
+            signature: "studio|1920x1080@1.00".to_string(),
+            monitor_key: "1920x1080@1.00".to_string(),
+            position_x: 3432,
+            position_y: 0,
+        };
+        let candidates = vec![
+            MonitorSelectionCandidate {
+                signature: "builtin|1512x982@2.00".to_string(),
+                monitor_key: "1512x982@2.00".to_string(),
+                position_x: 0,
+                position_y: 0,
+            },
+            MonitorSelectionCandidate {
+                signature: "studio|1920x1080@1.00".to_string(),
+                monitor_key: "1920x1080@1.00".to_string(),
+                position_x: 3432,
+                position_y: 0,
+            },
+            MonitorSelectionCandidate {
+                signature: "studio|1920x1080@1.00".to_string(),
+                monitor_key: "1920x1080@1.00".to_string(),
+                position_x: 1512,
+                position_y: 0,
+            },
+        ];
+
+        assert_eq!(
+            resolve_saved_monitor_index(Some(&saved_state), &candidates),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn resolve_saved_monitor_index_chooses_nearest_duplicate_monitor() {
+        let saved_state = LastMonitorState {
+            signature: "studio|1920x1080@1.00".to_string(),
+            monitor_key: "1920x1080@1.00".to_string(),
+            position_x: 1500,
+            position_y: 0,
+        };
+        let candidates = vec![
+            MonitorSelectionCandidate {
+                signature: "studio|1920x1080@1.00".to_string(),
+                monitor_key: "1920x1080@1.00".to_string(),
+                position_x: 0,
+                position_y: 0,
+            },
+            MonitorSelectionCandidate {
+                signature: "studio|1920x1080@1.00".to_string(),
+                monitor_key: "1920x1080@1.00".to_string(),
+                position_x: 1512,
+                position_y: 0,
+            },
+        ];
+
+        assert_eq!(
+            resolve_saved_monitor_index(Some(&saved_state), &candidates),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn resolve_saved_monitor_index_returns_none_when_monitor_is_missing() {
+        let saved_state = LastMonitorState {
+            signature: "studio|1920x1080@1.00".to_string(),
+            monitor_key: "1920x1080@1.00".to_string(),
+            position_x: 1512,
+            position_y: 0,
+        };
+        let candidates = vec![MonitorSelectionCandidate {
+            signature: "builtin|1512x982@2.00".to_string(),
+            monitor_key: "1512x982@2.00".to_string(),
+            position_x: 0,
+            position_y: 0,
+        }];
+
+        assert_eq!(
+            resolve_saved_monitor_index(Some(&saved_state), &candidates),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_saved_monitor_index_falls_back_to_monitor_key_when_name_changes() {
+        let saved_state = LastMonitorState {
+            signature: "Built-in Retina Display|1512x982@2.00".to_string(),
+            monitor_key: "1512x982@2.00".to_string(),
+            position_x: 0,
+            position_y: 0,
+        };
+        let candidates = vec![
+            MonitorSelectionCandidate {
+                signature: "|1512x982@2.00".to_string(),
+                monitor_key: "1512x982@2.00".to_string(),
+                position_x: 0,
+                position_y: 0,
+            },
+            MonitorSelectionCandidate {
+                signature: "studio|1920x1080@1.00".to_string(),
+                monitor_key: "1920x1080@1.00".to_string(),
+                position_x: 1512,
+                position_y: 0,
+            },
+        ];
+
+        assert_eq!(
+            resolve_saved_monitor_index(Some(&saved_state), &candidates),
+            Some(0)
+        );
+    }
 }
 
 #[tauri::command]

@@ -255,8 +255,10 @@ describe("useTranslationStream", () => {
 
     expect(invokeWithTimeoutMock).toHaveBeenCalledTimes(2);
 
-    resolveStream?.();
-    await firstPromise;
+    await act(async () => {
+      resolveStream?.();
+      await firstPromise;
+    });
   });
 
   it("clears active stream handlers when clearResult is called", async () => {

@@ -14,6 +14,35 @@ static EVENT_RUN_LOOP_PTR: AtomicUsize = AtomicUsize::new(0);
 
 const DEFAULT_DOUBLE_PRESS_INTERVAL_MS: u64 = 500;
 
+fn resolve_restored_window_size(
+    monitor_logical_width: i32,
+    current_logical_size: Option<(i32, i32)>,
+    saved_width: Option<i32>,
+) -> (i32, i32) {
+    let width = saved_width
+        .unwrap_or_else(|| crate::utils::monitor::calculate_adaptive_width(monitor_logical_width))
+        .clamp(800, 1600);
+    let height = current_logical_size
+        .map(|(_, height)| height)
+        .unwrap_or(280)
+        .clamp(48, 760);
+
+    (width, height)
+}
+
+fn get_current_logical_window_size(window: &tauri::WebviewWindow) -> Option<(i32, i32)> {
+    let size = window.outer_size().ok()?;
+    let scale = window.scale_factor().ok()?;
+    if scale <= 0.0 {
+        return None;
+    }
+
+    Some((
+        (size.width as f64 / scale).round() as i32,
+        (size.height as f64 / scale).round() as i32,
+    ))
+}
+
 pub fn set_double_press_interval(interval_ms: u64) {
     let clamped = interval_ms.clamp(200, 1000);
     DOUBLE_PRESS_INTERVAL_MS.store(clamped, Ordering::SeqCst);
@@ -21,35 +50,49 @@ pub fn set_double_press_interval(interval_ms: u64) {
 }
 
 /// Show the window and set focus
-/// Before showing, update the monitor index based on cursor position and
-/// set the window position to bottom-center of the target monitor.
-/// This ensures the window is never shown at a stale or off-screen position.
+/// Before showing, restore onto the last-used monitor when available.
+/// If that monitor is no longer present after hotplug changes, fall back to
+/// the cursor monitor and then the primary monitor.
 pub fn show_window_at_position(window: &tauri::WebviewWindow) {
-    use crate::utils::monitor::{calculate_adaptive_width, sort_monitors_by_position};
-
-    // Update monitor index based on cursor position before showing
-    crate::commands::window::update_monitor_from_cursor(window.app_handle());
+    use crate::utils::monitor::{generate_monitor_key, sort_monitors_by_position};
 
     // Calculate and set position before showing
     if let Ok(monitors) = window.app_handle().available_monitors() {
         let sorted = sort_monitors_by_position(monitors.iter());
-        let monitor_index = crate::commands::window::get_last_monitor_index();
-        let monitor = sorted
-            .get(monitor_index)
-            .copied()
-            .or_else(|| sorted.first().copied());
+        let resolved_monitor =
+            crate::commands::window::resolve_last_used_monitor(window.app_handle(), &sorted);
 
-        if let Some(monitor) = monitor {
+        if let Some((monitor_index, monitor)) = resolved_monitor {
             let mon_pos = monitor.position();
             let mon_size = monitor.size();
             let scale = monitor.scale_factor();
 
             let mon_logical_width = (mon_size.width as f64 / scale) as i32;
             let mon_logical_height = (mon_size.height as f64 / scale) as i32;
+            let monitor_key = generate_monitor_key(mon_size.width, mon_size.height, scale);
+            let current_logical_size = get_current_logical_window_size(window);
+            let saved_width =
+                window
+                    .app_handle()
+                    .try_state::<crate::AppState>()
+                    .and_then(|state| {
+                        tauri::async_runtime::block_on(async {
+                            match state.db.get_monitor_window_width(&monitor_key).await {
+                                Ok(width) => width,
+                                Err(err) => {
+                                    log::warn!(
+                                        "Failed to load saved width for monitor {}: {}",
+                                        monitor_key,
+                                        err
+                                    );
+                                    None
+                                }
+                            }
+                        })
+                    });
 
-            let win_width = calculate_adaptive_width(mon_logical_width);
-            // Use default expanded height (matches set_drawer_mode "expanded")
-            let win_height = 280;
+            let (win_width, win_height) =
+                resolve_restored_window_size(mon_logical_width, current_logical_size, saved_width);
 
             let x = mon_pos.x + (mon_logical_width - win_width) / 2;
             let y = mon_pos.y + mon_logical_height - win_height;
@@ -70,11 +113,15 @@ pub fn show_window_at_position(window: &tauri::WebviewWindow) {
             }
 
             log::info!(
-                "Window positioned at ({}, {}), size {}x{} before showing",
+                "Window positioned at ({}, {}), size {}x{} before showing (monitor_index={}, monitor_key={}, saved_width={:?}, current_size={:?})",
                 x,
                 y,
                 win_width,
-                win_height
+                win_height,
+                monitor_index,
+                monitor_key,
+                saved_width,
+                current_logical_size
             );
         }
     }
@@ -87,6 +134,35 @@ pub fn show_window_at_position(window: &tauri::WebviewWindow) {
     }
 
     log::info!("Window shown and focused");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_restored_window_size;
+
+    #[test]
+    fn resolve_restored_window_size_prefers_saved_width_and_preserves_height() {
+        let size = resolve_restored_window_size(1512, Some((1209, 428)), Some(1344));
+        assert_eq!(size, (1344, 428));
+    }
+
+    #[test]
+    fn resolve_restored_window_size_falls_back_to_adaptive_defaults() {
+        let size = resolve_restored_window_size(1512, None, None);
+        assert_eq!(size, (1209, 280));
+    }
+
+    #[test]
+    fn resolve_restored_window_size_clamps_height_bounds() {
+        assert_eq!(
+            resolve_restored_window_size(1920, Some((1400, 12)), None),
+            (1344, 48)
+        );
+        assert_eq!(
+            resolve_restored_window_size(1920, Some((1400, 999)), None),
+            (1344, 760)
+        );
+    }
 }
 
 #[derive(Clone, serde::Serialize)]
