@@ -61,6 +61,8 @@ TransClip은 Claude AI를 사용하여 번역합니다. API 키가 필요합니�
 2. TransClip 앱 실행 후 **설정** 탭에서 API 키 입력
 3. API 키는 macOS 키체인에 안전하게 저장됩니다
 
+사내 Anthropic 호환 gateway를 사용하는 경우 **설정 > API 키 > Anthropic 엔드포인트**에 gateway URL을 입력하세요. 루트 URL을 입력하면 `/v1/messages` 엔드포인트로 호출합니다.
+
 ## 🎮 사용 방법
 
 ### 번역하기

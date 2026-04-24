@@ -2,6 +2,8 @@ use futures_util::StreamExt;
 use std::sync::OnceLock;
 use std::time::Duration;
 
+pub const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
+
 pub struct AnthropicStreamResult {
     pub full_text: String,
     pub input_tokens: Option<i32>,
@@ -41,6 +43,40 @@ pub fn anthropic_http_client() -> &'static reqwest::Client {
                 reqwest::Client::new()
             })
     })
+}
+
+pub fn normalize_anthropic_base_url(base_url: &str) -> Result<String, String> {
+    let trimmed = base_url.trim().trim_end_matches('/');
+
+    if trimmed.is_empty() {
+        return Ok(DEFAULT_ANTHROPIC_BASE_URL.to_string());
+    }
+
+    let mut url = reqwest::Url::parse(trimmed)
+        .map_err(|_| "Anthropic endpoint must be a valid URL".to_string())?;
+
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err("Anthropic endpoint must start with http:// or https://".to_string());
+    }
+
+    url.set_query(None);
+    url.set_fragment(None);
+
+    Ok(url.as_str().trim_end_matches('/').to_string())
+}
+
+pub fn anthropic_messages_url(base_url: &str) -> Result<String, String> {
+    let normalized = normalize_anthropic_base_url(base_url)?;
+
+    if normalized.ends_with("/v1/messages") {
+        return Ok(normalized);
+    }
+
+    if normalized.ends_with("/v1") {
+        return Ok(format!("{normalized}/messages"));
+    }
+
+    Ok(format!("{normalized}/v1/messages"))
 }
 
 fn process_sse_line(
@@ -132,7 +168,10 @@ pub async fn stream_anthropic_sse(
 
 #[cfg(test)]
 mod tests {
-    use super::extract_anthropic_message_text;
+    use super::{
+        anthropic_messages_url, extract_anthropic_message_text, normalize_anthropic_base_url,
+        DEFAULT_ANTHROPIC_BASE_URL,
+    };
 
     #[test]
     fn extracts_text_from_valid_message_body() {
@@ -162,5 +201,34 @@ mod tests {
         });
         let err = extract_anthropic_message_text(&body).expect_err("should fail");
         assert!(err.contains("missing content[0].text string"));
+    }
+
+    #[test]
+    fn anthropic_messages_url_accepts_root_or_endpoint_urls() {
+        assert_eq!(
+            anthropic_messages_url("").expect("default URL should be valid"),
+            format!("{DEFAULT_ANTHROPIC_BASE_URL}/v1/messages")
+        );
+        assert_eq!(
+            anthropic_messages_url("https://ai-gateway.example.com")
+                .expect("root gateway URL should be valid"),
+            "https://ai-gateway.example.com/v1/messages"
+        );
+        assert_eq!(
+            anthropic_messages_url("https://ai-gateway.example.com/v1")
+                .expect("versioned gateway URL should be valid"),
+            "https://ai-gateway.example.com/v1/messages"
+        );
+        assert_eq!(
+            anthropic_messages_url("https://ai-gateway.example.com/v1/messages")
+                .expect("full endpoint URL should be valid"),
+            "https://ai-gateway.example.com/v1/messages"
+        );
+    }
+
+    #[test]
+    fn normalize_anthropic_base_url_rejects_invalid_urls() {
+        assert!(normalize_anthropic_base_url("not a url").is_err());
+        assert!(normalize_anthropic_base_url("file:///tmp/socket").is_err());
     }
 }

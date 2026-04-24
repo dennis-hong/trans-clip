@@ -246,6 +246,7 @@ pub struct UserSettingsResponse {
     pub popup_position: String,
     pub launch_at_login: bool,
     pub paste_delay_ms: i32,
+    pub anthropic_base_url: String,
 }
 
 impl From<UserSettingsRow> for UserSettingsResponse {
@@ -260,6 +261,7 @@ impl From<UserSettingsRow> for UserSettingsResponse {
             popup_position: row.popup_position,
             launch_at_login: row.launch_at_login != 0,
             paste_delay_ms: row.paste_delay_ms,
+            anthropic_base_url: row.anthropic_base_url,
         }
     }
 }
@@ -276,6 +278,7 @@ pub struct UpdateSettingsRequest {
     pub popup_position: Option<String>,
     pub launch_at_login: Option<bool>,
     pub paste_delay_ms: Option<i32>,
+    pub anthropic_base_url: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

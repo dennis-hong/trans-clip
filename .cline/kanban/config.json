@@ -1,0 +1,24 @@
+{
+  "shortcuts": [],
+  "jiraSync": {
+    "enabled": true,
+    "siteUrl": "https://lunit.atlassian.net",
+    "jiraProjectKey": "AIPF",
+    "previewQuery": "project = AIPF AND statusCategory != Done ORDER BY updated DESC",
+    "syncOnOpen": true,
+    "intervalMinutes": 10,
+    "ignoredIssueKeys": [],
+    "includeDescriptionInPrompt": false,
+    "lastSyncAt": 1776661363979,
+    "lastSyncResult": {
+      "status": "success",
+      "message": "Synced 12 imported Jira tasks.",
+      "candidateCount": 99,
+      "importedCount": 12,
+      "updatedCount": 12,
+      "staleCount": 9,
+      "newCandidateCount": 96,
+      "skippedCount": 0
+    }
+  }
+}

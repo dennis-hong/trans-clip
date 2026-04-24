@@ -1,7 +1,8 @@
 use crate::database::TranslationRow;
 use crate::keychain;
 use crate::utils::streaming::{
-    anthropic_http_client, extract_anthropic_message_text, stream_anthropic_sse,
+    anthropic_http_client, anthropic_messages_url, extract_anthropic_message_text,
+    stream_anthropic_sse,
 };
 use crate::AppState;
 use tauri::ipc::Channel;
@@ -235,7 +236,7 @@ pub async fn translate(
     );
 
     let response = client
-        .post("https://api.anthropic.com/v1/messages")
+        .post(anthropic_messages_url(&settings.anthropic_base_url)?)
         .header("x-api-key", &api_key)
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
@@ -518,7 +519,7 @@ pub async fn translate_stream(
     // Call Claude API with streaming
     let client = anthropic_http_client();
     let response = client
-        .post("https://api.anthropic.com/v1/messages")
+        .post(anthropic_messages_url(&settings.anthropic_base_url)?)
         .header("x-api-key", &api_key)
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")

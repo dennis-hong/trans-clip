@@ -85,7 +85,7 @@ export function ApiKeyInput({ hasApiKey }: ApiKeyInputProps) {
           type={showKey ? "text" : "password"}
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
-          placeholder="sk-ant-..."
+          placeholder="sk-ant-... 또는 sk-..."
           className="w-full px-2 py-1.5 pr-8 bg-white rounded-md border border-yellow-300 focus:ring-2 focus:ring-yellow-500 focus:border-yellow-400 outline-none text-sm"
         />
         <button
@@ -117,7 +117,7 @@ export function ApiKeyInput({ hasApiKey }: ApiKeyInputProps) {
         >
           console.anthropic.com
         </a>
-        에서 발급받으세요
+        또는 사내 API gateway에서 발급받은 키를 입력하세요
       </p>
       <div className="flex items-center gap-2">
         <button

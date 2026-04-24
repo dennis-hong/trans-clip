@@ -141,6 +141,7 @@ impl Database {
                 popup_position TEXT NOT NULL DEFAULT 'cursor',
                 launch_at_login INTEGER NOT NULL DEFAULT 0,
                 paste_delay_ms INTEGER NOT NULL DEFAULT 150,
+                anthropic_base_url TEXT NOT NULL DEFAULT 'https://api.anthropic.com',
                 api_key TEXT,
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
@@ -161,6 +162,20 @@ impl Database {
             Err(err) => return Err(err),
         }
 
+        // Migration: add anthropic_base_url column if it doesn't exist
+        match sqlx::query(
+            "ALTER TABLE user_settings ADD COLUMN anthropic_base_url TEXT NOT NULL DEFAULT 'https://api.anthropic.com'",
+        )
+        .execute(&self.pool)
+        .await
+        {
+            Ok(_) => {}
+            Err(err) if is_duplicate_column_error(&err, "anthropic_base_url") => {
+                log::debug!("Skipping anthropic_base_url migration: column already exists");
+            }
+            Err(err) => return Err(err),
+        }
+
         // Migration: add paste_delay_ms column if it doesn't exist
         match sqlx::query(
             "ALTER TABLE user_settings ADD COLUMN paste_delay_ms INTEGER NOT NULL DEFAULT 150",
@@ -174,6 +189,13 @@ impl Database {
             }
             Err(err) => return Err(err),
         }
+
+        // Migration: replace retired Opus 4.6 setting with current Opus 4.7.
+        sqlx::query(
+            "UPDATE user_settings SET preferred_model = 'claude-opus-4-7' WHERE preferred_model = 'claude-opus-4-6'",
+        )
+        .execute(&self.pool)
+        .await?;
 
         // Migration: add updated_at column to clipboard_items if it doesn't exist
         match sqlx::query("ALTER TABLE clipboard_items ADD COLUMN updated_at DATETIME")
@@ -785,7 +807,8 @@ impl Database {
         sqlx::query_as::<_, UserSettingsRow>(
             r#"
             SELECT id, max_history_count, preferred_model, auto_detect_language, double_press_interval,
-                   translation_cache_days, show_source_app, popup_position, launch_at_login, paste_delay_ms, api_key, updated_at
+                   translation_cache_days, show_source_app, popup_position, launch_at_login, paste_delay_ms,
+                   anthropic_base_url, api_key, updated_at
             FROM user_settings
             WHERE id = 'default'
             "#,
@@ -807,6 +830,7 @@ impl Database {
                 popup_position = ?,
                 launch_at_login = ?,
                 paste_delay_ms = ?,
+                anthropic_base_url = ?,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = 'default'
             "#,
@@ -820,6 +844,7 @@ impl Database {
         .bind(&settings.popup_position)
         .bind(settings.launch_at_login)
         .bind(settings.paste_delay_ms)
+        .bind(&settings.anthropic_base_url)
         .execute(&self.pool)
         .await?;
 
@@ -861,8 +886,9 @@ impl Database {
     }
 
     pub fn validate_api_key_format(api_key: &str) -> bool {
-        // Claude API keys typically start with "sk-ant-" and have a specific length
-        api_key.starts_with("sk-ant-") && api_key.len() > 20
+        // Claude keys start with "sk-ant-"; LiteLLM gateway keys often use "sk-".
+        let trimmed = api_key.trim();
+        trimmed.starts_with("sk-") && trimmed.len() > 20
     }
 
     // ============================================
@@ -960,6 +986,7 @@ pub struct UserSettingsRow {
     pub popup_position: String,
     pub launch_at_login: i32,
     pub paste_delay_ms: i32,
+    pub anthropic_base_url: String,
     pub api_key: Option<String>,
     pub updated_at: String,
 }
@@ -1031,9 +1058,12 @@ mod tests {
     }
 
     #[test]
-    fn validate_api_key_format_requires_expected_prefix_and_length() {
+    fn validate_api_key_format_requires_sk_prefix_and_length() {
         assert!(Database::validate_api_key_format(
             "sk-ant-this-is-a-valid-looking-key"
+        ));
+        assert!(Database::validate_api_key_format(
+            "sk-this-is-a-valid-looking-gateway-key"
         ));
         assert!(!Database::validate_api_key_format("sk-test-short"));
         assert!(!Database::validate_api_key_format("invalid-prefix-value"));
@@ -1047,6 +1077,7 @@ mod tests {
         let settings = db.get_settings().await.expect("should fetch settings");
 
         assert_eq!(settings.preferred_model, DEFAULT_PREFERRED_MODEL);
+        assert_eq!(settings.anthropic_base_url, "https://api.anthropic.com");
 
         let _ = std::fs::remove_file(path);
     }
@@ -1089,6 +1120,56 @@ mod tests {
         let settings = db.get_settings().await.expect("should fetch settings");
 
         assert_eq!(settings.preferred_model, DEFAULT_PREFERRED_MODEL);
+        assert_eq!(settings.anthropic_base_url, "https://api.anthropic.com");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn migrates_retired_opus_model_to_latest_opus() {
+        let path = test_db_path();
+        let db_url = format!("sqlite:{}?mode=rwc", path.display());
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&db_url)
+            .await
+            .expect("pool should connect");
+
+        sqlx::query(
+            r#"
+            CREATE TABLE user_settings (
+                id TEXT PRIMARY KEY DEFAULT 'default',
+                max_history_count INTEGER NOT NULL DEFAULT 50,
+                preferred_model TEXT NOT NULL DEFAULT 'claude-opus-4-6',
+                auto_detect_language INTEGER NOT NULL DEFAULT 1,
+                double_press_interval INTEGER NOT NULL DEFAULT 500,
+                translation_cache_days INTEGER NOT NULL DEFAULT 7,
+                show_source_app INTEGER NOT NULL DEFAULT 1,
+                popup_position TEXT NOT NULL DEFAULT 'cursor',
+                launch_at_login INTEGER NOT NULL DEFAULT 0,
+                paste_delay_ms INTEGER NOT NULL DEFAULT 150,
+                api_key TEXT,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("should create legacy user_settings table");
+
+        sqlx::query(
+            "INSERT INTO user_settings (id, preferred_model) VALUES ('default', 'claude-opus-4-6')",
+        )
+        .execute(&pool)
+        .await
+        .expect("should insert legacy settings");
+
+        drop(pool);
+
+        let db = Database::new(&path).await.expect("db should initialize");
+        let settings = db.get_settings().await.expect("should fetch settings");
+
+        assert_eq!(settings.preferred_model, "claude-opus-4-7");
 
         let _ = std::fs::remove_file(path);
     }

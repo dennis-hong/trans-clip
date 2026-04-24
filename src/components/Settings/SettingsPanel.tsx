@@ -3,7 +3,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { useSettingsStore, useUpdateStore } from "@/store";
 import { ApiKeyInput } from "./ApiKeyInput";
+import { CLAUDE_MODELS } from "@/types";
 import type { ClaudeModel, PermissionStatus } from "@/types";
+
+const DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com";
 
 export function SettingsPanel() {
   const {
@@ -13,6 +16,7 @@ export function SettingsPanel() {
     updateSettings,
     fetchApiKeyStatus,
     isLoading,
+    error,
   } = useSettingsStore();
   const {
     currentVersion,
@@ -30,6 +34,7 @@ export function SettingsPanel() {
   } = useUpdateStore();
 
   const [accessibilityGranted, setAccessibilityGranted] = useState<boolean | null>(null);
+  const [anthropicBaseUrl, setAnthropicBaseUrl] = useState("");
   const accessibilityCheckTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMountedRef = useRef(true);
 
@@ -62,8 +67,30 @@ export function SettingsPanel() {
     void initCurrentVersion();
   }, [fetchSettings, fetchApiKeyStatus, initCurrentVersion]);
 
+  useEffect(() => {
+    if (settings?.anthropicBaseUrl) {
+      setAnthropicBaseUrl(settings.anthropicBaseUrl);
+    }
+  }, [settings?.anthropicBaseUrl]);
+
   const handleModelChange = (model: ClaudeModel) => {
     updateSettings({ preferredModel: model });
+  };
+
+  const handleAnthropicBaseUrlSave = () => {
+    const nextBaseUrl = anthropicBaseUrl.trim();
+    if (nextBaseUrl === settings?.anthropicBaseUrl) {
+      return;
+    }
+    updateSettings({ anthropicBaseUrl: nextBaseUrl });
+  };
+
+  const handleAnthropicBaseUrlReset = () => {
+    setAnthropicBaseUrl(DEFAULT_ANTHROPIC_BASE_URL);
+    if (settings?.anthropicBaseUrl === DEFAULT_ANTHROPIC_BASE_URL) {
+      return;
+    }
+    updateSettings({ anthropicBaseUrl: DEFAULT_ANTHROPIC_BASE_URL });
   };
 
   const handleMaxHistoryChange = (value: number) => {
@@ -147,6 +174,42 @@ export function SettingsPanel() {
           title="API 키"
           color="yellow"
         >
+          <div className="mb-3 space-y-2">
+            <label className="block text-xs font-medium text-yellow-700">
+              Anthropic 엔드포인트
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="url"
+                value={anthropicBaseUrl}
+                onChange={(e) => setAnthropicBaseUrl(e.target.value)}
+                onBlur={handleAnthropicBaseUrlSave}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.currentTarget.blur();
+                  }
+                }}
+                placeholder={DEFAULT_ANTHROPIC_BASE_URL}
+                className="min-w-0 flex-1 px-2 py-1.5 bg-white rounded-md border border-yellow-300 focus:ring-2 focus:ring-yellow-500 focus:border-yellow-400 outline-none text-sm"
+                disabled={isLoading}
+              />
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleAnthropicBaseUrlReset}
+                disabled={isLoading || settings.anthropicBaseUrl === DEFAULT_ANTHROPIC_BASE_URL}
+                className="shrink-0 px-2 py-1.5 text-xs font-medium text-yellow-700 bg-yellow-200 hover:bg-yellow-300 rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                기본값
+              </button>
+            </div>
+            <p className="text-[10px] text-yellow-600">
+              사내 gateway는 루트 URL을 입력하면 /v1/messages로 호출됩니다.
+            </p>
+            {error && (
+              <p className="text-[10px] text-red-600">{error}</p>
+            )}
+          </div>
           <ApiKeyInput hasApiKey={apiKeyStatus?.exists ?? false} />
         </SettingsCard>
 
@@ -167,9 +230,11 @@ export function SettingsPanel() {
               className="w-full px-2 py-1.5 text-sm bg-white border border-blue-300 rounded-md focus:ring-2 focus:ring-blue-500"
               disabled={isLoading}
             >
-              <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (가장 빠름)</option>
-              <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (균형)</option>
-              <option value="claude-opus-4-6">Claude Opus 4.6 (최고 품질)</option>
+              {CLAUDE_MODELS.map((model) => (
+                <option key={model.id} value={model.id}>
+                  Claude {model.name} ({model.description})
+                </option>
+              ))}
             </select>
           </div>
 

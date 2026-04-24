@@ -133,11 +133,12 @@ pub fn resolve_api_key(settings_api_key: &Option<String>) -> Option<String> {
 }
 
 /// Validate the API key by making a test request to the Claude API
-pub async fn validate_api_key(api_key: &str) -> Result<bool, String> {
+pub async fn validate_api_key(api_key: &str, anthropic_base_url: &str) -> Result<bool, String> {
     let client = crate::utils::streaming::anthropic_http_client();
+    let messages_url = crate::utils::streaming::anthropic_messages_url(anthropic_base_url)?;
 
     let response = client
-        .post("https://api.anthropic.com/v1/messages")
+        .post(messages_url)
         .header("x-api-key", api_key)
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")

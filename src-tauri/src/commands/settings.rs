@@ -1,4 +1,5 @@
 use crate::keychain;
+use crate::utils::streaming::normalize_anthropic_base_url;
 use crate::AppState;
 use tauri::State;
 
@@ -69,6 +70,9 @@ pub async fn update_settings(
     if let Some(v) = settings.paste_delay_ms {
         current.paste_delay_ms = v.clamp(50, 500);
     }
+    if let Some(v) = settings.anthropic_base_url {
+        current.anthropic_base_url = normalize_anthropic_base_url(&v)?;
+    }
 
     db.update_settings(&current)
         .await
@@ -118,6 +122,8 @@ pub async fn set_api_key(
     state: State<'_, AppState>,
     api_key: String,
 ) -> Result<SetApiKeyResponse, String> {
+    let api_key = api_key.trim().to_string();
+
     // Basic format validation
     if !crate::database::Database::validate_api_key_format(&api_key) {
         return Ok(SetApiKeyResponse {
@@ -125,13 +131,15 @@ pub async fn set_api_key(
             is_valid: false,
             error: Some(ErrorDetail {
                 code: "INVALID_KEY".to_string(),
-                message: "Invalid API key format. Key should start with 'sk-ant-'".to_string(),
+                message: "Invalid API key format. Key should start with 'sk-'".to_string(),
             }),
         });
     }
 
+    let settings = state.db.get_settings().await.map_err(|e| e.to_string())?;
+
     // Validate with API (but save anyway if validation fails due to network issues)
-    let is_valid = match keychain::validate_api_key(&api_key).await {
+    let is_valid = match keychain::validate_api_key(&api_key, &settings.anthropic_base_url).await {
         Ok(valid) => valid,
         Err(e) => {
             log::warn!("API key validation error (saving anyway): {}", e);
