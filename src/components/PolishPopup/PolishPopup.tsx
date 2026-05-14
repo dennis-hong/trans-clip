@@ -5,12 +5,13 @@ import { useWindowDrag } from "@/hooks/useWindowDrag";
 import {
   usePolishStore,
   useClipboardStore,
+  useSettingsStore,
   POLISH_CONTEXTS,
   POLISH_CHANNELS,
   POLISH_OPTIONS,
 } from "@/store";
 import type { PolishContext, PolishChannel, PolishOption, ClaudeModel } from "@/types";
-import { CLAUDE_MODELS } from "@/types";
+import { CLAUDE_MODELS, DEFAULT_CLAUDE_MODEL, formatClaudeModelOption } from "@/types";
 
 interface PolishPopupProps {
   sourceText: string;
@@ -33,6 +34,7 @@ export function PolishPopup({
     error,
   } = usePolishStream();
   const { createItem } = useClipboardStore();
+  const { settings, fetchSettings } = useSettingsStore();
   const { handleDragStart } = useWindowDrag();
   const [editableText, setEditableText] = useState(sourceText);
   const [isSaved, setIsSaved] = useState(false);
@@ -55,10 +57,25 @@ export function PolishPopup({
     };
   }, []);
 
+  useEffect(() => {
+    if (!settings) {
+      void fetchSettings();
+    }
+  }, [fetchSettings, settings]);
+
   // Sync editableText when sourceText changes
   useEffect(() => {
     setEditableText(sourceText);
   }, [sourceText]);
+
+  const defaultModel = settings?.preferredModel ?? DEFAULT_CLAUDE_MODEL;
+  const displayModel = selectedModel ?? defaultModel;
+
+  useEffect(() => {
+    if (selectedModel === defaultModel) {
+      setSelectedModel(undefined);
+    }
+  }, [defaultModel, selectedModel]);
 
   // Get last used settings from store
   const {
@@ -137,6 +154,10 @@ export function PolishPopup({
       polish(editableText, lastContext, lastChannel, lastOptions, selectedModel);
     }
   }, [editableText, lastContext, lastChannel, lastOptions, selectedModel, polish]);
+
+  const handleModelChange = (model: ClaudeModel) => {
+    setSelectedModel(model === defaultModel ? undefined : model);
+  };
 
   const handleSaveAsPostIt = useCallback(async () => {
     const textToSave = fullText || streamedText;
@@ -430,14 +451,13 @@ export function PolishPopup({
             <div className="flex items-center gap-1.5">
               <label className="text-[10px] text-gray-500">모델</label>
               <select
-                value={selectedModel ?? ""}
-                onChange={(e) => setSelectedModel(e.target.value ? e.target.value as ClaudeModel : undefined)}
+                value={displayModel}
+                onChange={(e) => handleModelChange(e.target.value as ClaudeModel)}
                 className="px-2 py-1 text-xs bg-white border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
               >
-                <option value="">기본값</option>
                 {CLAUDE_MODELS.map((model) => (
                   <option key={model.id} value={model.id}>
-                    {model.name} ({model.description})
+                    {formatClaudeModelOption(model, defaultModel)}
                   </option>
                 ))}
               </select>

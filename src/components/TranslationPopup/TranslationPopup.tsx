@@ -2,8 +2,13 @@ import { useEffect, useCallback, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslationStream } from "@/hooks/useTranslationStream";
 import { useWindowDrag } from "@/hooks/useWindowDrag";
-import { useClipboardStore } from "@/store";
-import { CLAUDE_MODELS, type ClaudeModel } from "@/types";
+import { useClipboardStore, useSettingsStore } from "@/store";
+import {
+  CLAUDE_MODELS,
+  DEFAULT_CLAUDE_MODEL,
+  formatClaudeModelOption,
+  type ClaudeModel,
+} from "@/types";
 
 interface TranslationPopupProps {
   sourceText: string;
@@ -27,6 +32,7 @@ export function TranslationPopup({
     error,
   } = useTranslationStream();
   const { createItem } = useClipboardStore();
+  const { settings, fetchSettings } = useSettingsStore();
   const { handleDragStart } = useWindowDrag();
   const [editableText, setEditableText] = useState(sourceText);
   const [isSaved, setIsSaved] = useState(false);
@@ -48,10 +54,26 @@ export function TranslationPopup({
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!settings) {
+      void fetchSettings();
+    }
+  }, [fetchSettings, settings]);
+
   // Sync editableText when sourceText changes
   useEffect(() => {
     setEditableText(sourceText);
   }, [sourceText]);
+
+  const defaultModel = settings?.preferredModel ?? DEFAULT_CLAUDE_MODEL;
+  const displayModel = selectedModel ?? defaultModel;
+
+  useEffect(() => {
+    if (selectedModel === defaultModel) {
+      setSelectedModel(undefined);
+    }
+  }, [defaultModel, selectedModel]);
 
   // Translate on mount only
   useEffect(() => {
@@ -116,6 +138,10 @@ export function TranslationPopup({
       translate(editableText, selectedModel);
     }
   }, [editableText, selectedModel, translate]);
+
+  const handleModelChange = (model: ClaudeModel) => {
+    setSelectedModel(model === defaultModel ? undefined : model);
+  };
 
   const handleSaveAsPostIt = useCallback(async () => {
     const textToSave = fullText || streamedText;
@@ -376,14 +402,13 @@ export function TranslationPopup({
         <div className="flex flex-wrap items-center gap-2 mr-auto">
           <label className="text-[10px] text-gray-500">모델</label>
           <select
-            value={selectedModel ?? ""}
-            onChange={(e) => setSelectedModel(e.target.value ? e.target.value as ClaudeModel : undefined)}
+            value={displayModel}
+            onChange={(e) => handleModelChange(e.target.value as ClaudeModel)}
             className="px-2 py-1 text-xs bg-white border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           >
-            <option value="">기본값</option>
             {CLAUDE_MODELS.map((model) => (
               <option key={model.id} value={model.id}>
-                {model.name} ({model.description})
+                {formatClaudeModelOption(model, defaultModel)}
               </option>
             ))}
           </select>

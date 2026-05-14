@@ -92,6 +92,19 @@ export const CLAUDE_MODELS: ClaudeModelInfo[] = [
   { id: "claude-haiku-4-5-20251001", name: "Haiku 4.5", description: "가장 빠름" },
 ] as const;
 
+export const DEFAULT_CLAUDE_MODEL: ClaudeModel = "claude-sonnet-4-6";
+
+export function formatClaudeModelOption(
+  model: ClaudeModelInfo,
+  defaultModel: ClaudeModel = DEFAULT_CLAUDE_MODEL
+) {
+  const description = model.id === defaultModel
+    ? `기본, ${model.description}`
+    : model.description;
+
+  return `${model.name} (${description})`;
+}
+
 // ============================================
 // Polish (Text Refinement) Types
 // ============================================
