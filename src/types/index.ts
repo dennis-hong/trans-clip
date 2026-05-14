@@ -55,7 +55,8 @@ export interface Translation {
  */
 export interface UserSettings {
   maxHistoryCount: number;
-  preferredModel: ClaudeModel;
+  preferredModel: string;
+  preferredModelProfileId?: string | null;
   autoDetectLanguage: boolean;
   doublePressInterval: number;
   translationCacheDays: number;
@@ -64,6 +65,8 @@ export interface UserSettings {
   launchAtLogin: boolean;
   pasteDelayMs: number;
   anthropicBaseUrl: string;
+  aiProviderConfigs: AiProviderConfig[];
+  aiModelProfiles: AiModelProfile[];
 }
 
 // ============================================
@@ -71,38 +74,65 @@ export interface UserSettings {
 // ============================================
 
 export type Language = "ko" | "en";
-export type ClaudeModel = "claude-opus-4-7" | "claude-sonnet-4-6" | "claude-haiku-4-5-20251001";
+export type ModelProfileId = string;
 export type PopupPosition = "cursor" | "center" | "top-right";
+export type ProviderKind = "anthropic" | "openai" | "google";
+export type EndpointMode = "public" | "custom";
 
-/**
- * 모델 정보
- */
-export interface ClaudeModelInfo {
-  id: ClaudeModel;
-  name: string;
-  description: string;
+export interface AiProviderConfig {
+  id: string;
+  displayName: string;
+  providerKind: ProviderKind;
+  endpointMode: EndpointMode;
+  baseUrl: string;
+  authScheme: "bearer" | "x_api_key" | "x_goog_api_key";
+  enabled: boolean;
+}
+
+export interface AiModelProfile {
+  id: ModelProfileId;
+  providerConfigId: string;
+  displayName: string;
+  modelId: string;
+  apiInterface: "anthropic_messages" | "openai_responses" | "gemini_generate_content";
+  supportsStreaming: boolean;
+  maxOutputTokens: number;
+  sortOrder: number;
 }
 
 /**
- * 사용 가능한 Claude 모델 목록
+ * 기본 모델 프로필
  */
-export const CLAUDE_MODELS: ClaudeModelInfo[] = [
-  { id: "claude-opus-4-7", name: "Opus 4.7", description: "최고 품질" },
-  { id: "claude-sonnet-4-6", name: "Sonnet 4.6", description: "균형" },
-  { id: "claude-haiku-4-5-20251001", name: "Haiku 4.5", description: "가장 빠름" },
-] as const;
+export const DEFAULT_MODEL_PROFILE_ID = "anthropic:claude-sonnet-4-6";
+export const CUSTOM_ENDPOINT_API_KEY_ACCOUNT = "custom-endpoint";
 
-export const DEFAULT_CLAUDE_MODEL: ClaudeModel = "claude-sonnet-4-6";
+export const PROVIDER_DEFAULT_ENDPOINTS: Record<ProviderKind, string> = {
+  anthropic: "https://api.anthropic.com/v1",
+  openai: "https://api.openai.com/v1",
+  google: "https://generativelanguage.googleapis.com/v1beta",
+};
 
-export function formatClaudeModelOption(
-  model: ClaudeModelInfo,
-  defaultModel: ClaudeModel = DEFAULT_CLAUDE_MODEL
+export function providerLabel(providerKind: ProviderKind) {
+  switch (providerKind) {
+    case "anthropic":
+      return "Anthropic";
+    case "openai":
+      return "OpenAI";
+    case "google":
+      return "Google Gemini";
+  }
+}
+
+export function formatModelProfileOption(
+  profile: AiModelProfile,
+  providers: AiProviderConfig[],
+  defaultProfileId: ModelProfileId = DEFAULT_MODEL_PROFILE_ID
 ) {
-  const description = model.id === defaultModel
-    ? `기본, ${model.description}`
-    : model.description;
+  const provider = providers.find((item) => item.id === profile.providerConfigId);
+  const providerName = provider ? providerLabel(provider.providerKind) : profile.providerConfigId;
+  const suffix = profile.id === defaultProfileId ? " (기본)" : "";
 
-  return `${model.name} (${description})`;
+  return `${providerName} - ${profile.displayName}${suffix}`;
 }
 
 // ============================================

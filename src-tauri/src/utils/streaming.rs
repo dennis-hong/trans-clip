@@ -4,12 +4,14 @@ use std::time::Duration;
 
 pub const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
 
+#[allow(dead_code)]
 pub struct AnthropicStreamResult {
     pub full_text: String,
     pub input_tokens: Option<i32>,
     pub output_tokens: Option<i32>,
 }
 
+#[allow(dead_code)]
 pub fn extract_anthropic_message_text(body: &serde_json::Value) -> Result<String, String> {
     let content = body
         .get("content")
@@ -79,6 +81,7 @@ pub fn anthropic_messages_url(base_url: &str) -> Result<String, String> {
     Ok(format!("{normalized}/v1/messages"))
 }
 
+#[allow(dead_code)]
 fn process_sse_line(
     line: &str,
     full_text: &mut String,
@@ -115,6 +118,7 @@ fn process_sse_line(
     }
 }
 
+#[allow(dead_code)]
 pub async fn stream_anthropic_sse(
     res: reqwest::Response,
     mut on_delta: impl FnMut(&str),

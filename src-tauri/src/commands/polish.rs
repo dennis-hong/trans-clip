@@ -1,9 +1,10 @@
+use crate::ai::{
+    AiError, AiErrorCode, AiResolvedRequest, AiRuntime, AiStreamEvent, AiTextRequest, ModelProfile,
+    ProviderConfig,
+};
+use crate::database::UserSettingsRow;
 use crate::keychain;
 use crate::prompts;
-use crate::utils::streaming::{
-    anthropic_http_client, anthropic_messages_url, extract_anthropic_message_text,
-    stream_anthropic_sse,
-};
 use crate::AppState;
 use tauri::ipc::Channel;
 use tauri::State;
@@ -15,6 +16,95 @@ fn emit_polish_stream_event(on_event: &Channel<PolishStreamEvent>, event: Polish
     if let Err(err) = on_event.send(event) {
         log::warn!("Failed to send polish stream event: {}", err);
     }
+}
+
+fn translate_error(code: &str, message: impl Into<String>) -> TranslateError {
+    TranslateError {
+        code: code.to_string(),
+        message: message.into(),
+    }
+}
+
+fn map_ai_error(err: AiError) -> TranslateError {
+    let code = match err.code {
+        AiErrorCode::MissingApiKey | AiErrorCode::InvalidApiKey => "INVALID_API_KEY",
+        AiErrorCode::InvalidEndpoint => "NETWORK_ERROR",
+        AiErrorCode::UnsupportedModel | AiErrorCode::ProviderError => "API_ERROR",
+        AiErrorCode::StreamParseError => "STREAM_ERROR",
+        AiErrorCode::NetworkError => "NETWORK_ERROR",
+    };
+    translate_error(code, err.message)
+}
+
+fn response_token_usage(
+    input_tokens: Option<i32>,
+    output_tokens: Option<i32>,
+) -> Option<TokenUsage> {
+    match (input_tokens, output_tokens) {
+        (Some(i), Some(o)) => Some(TokenUsage {
+            input_tokens: i,
+            output_tokens: o,
+        }),
+        _ => None,
+    }
+}
+
+fn effective_model_profile_id(settings: &UserSettingsRow, model: Option<&String>) -> String {
+    model
+        .cloned()
+        .or_else(|| settings.preferred_model_profile_id.clone())
+        .unwrap_or_else(|| format!("anthropic:{}", settings.preferred_model))
+}
+
+async fn resolve_ai_request(
+    db: &crate::database::Database,
+    settings: &UserSettingsRow,
+    model_profile_id: String,
+    system_prompt: Option<String>,
+    user_prompt: String,
+) -> Result<AiResolvedRequest, TranslateError> {
+    let profile_row = db
+        .get_ai_model_profile(&model_profile_id)
+        .await
+        .map_err(|e| translate_error("API_ERROR", e.to_string()))?
+        .ok_or_else(|| translate_error("API_ERROR", "Selected model profile was not found"))?;
+    let provider_row = db
+        .get_ai_provider_config(&profile_row.provider_config_id)
+        .await
+        .map_err(|e| translate_error("API_ERROR", e.to_string()))?
+        .ok_or_else(|| translate_error("API_ERROR", "Selected provider was not found"))?;
+
+    let provider_config =
+        ProviderConfig::try_from(provider_row).map_err(|e| translate_error("API_ERROR", e))?;
+    if !provider_config.enabled {
+        return Err(translate_error(
+            "API_ERROR",
+            "Selected provider is disabled",
+        ));
+    }
+    let model_profile =
+        ModelProfile::try_from(profile_row).map_err(|e| translate_error("API_ERROR", e))?;
+    let api_key =
+        keychain::resolve_ai_api_key(&provider_config, &settings.api_key).ok_or_else(|| {
+            translate_error(
+                "INVALID_API_KEY",
+                "API key is not configured for the selected provider.",
+            )
+        })?;
+
+    let max_output_tokens = model_profile.max_output_tokens;
+    Ok(AiResolvedRequest {
+        provider_config,
+        model_profile,
+        api_key,
+        request: AiTextRequest {
+            model_profile_id: Some(model_profile_id),
+            system_prompt,
+            user_prompt,
+            max_output_tokens,
+            temperature: None,
+        },
+    })
 }
 
 #[tauri::command]
@@ -56,29 +146,8 @@ pub async fn polish(
     let db = &state.db;
     let settings = db.get_settings().await.map_err(|e| e.to_string())?;
 
-    // Get API key from Keychain (with SQLite fallback)
-    let api_key = match keychain::resolve_api_key(&settings.api_key) {
-        Some(key) => key,
-        _ => {
-            return Ok(PolishResponse {
-                success: false,
-                polished_text: None,
-                detected_language: None,
-                token_usage: None,
-                error: Some(TranslateError {
-                    code: "INVALID_API_KEY".to_string(),
-                    message: "API key not configured. Please set your Claude API key in Settings."
-                        .to_string(),
-                }),
-            });
-        }
-    };
-
     // Detect language
     let detected_lang = detect_language(&text);
-
-    // Use provided model or fall back to settings
-    let use_model = model.unwrap_or_else(|| settings.preferred_model.clone());
 
     // Build prompts using the prompts module
     let system_prompt = if detected_lang == "ko" {
@@ -90,95 +159,48 @@ pub async fn polish(
     let user_prompt =
         prompts::polish::build_user_prompt(&text, &context, &channel, &options, &detected_lang);
 
-    // Call Claude API
-    let client = anthropic_http_client();
-    let messages_url = anthropic_messages_url(&settings.anthropic_base_url)?;
-    let response = client
-        .post(messages_url)
-        .header("x-api-key", &api_key)
-        .header("anthropic-version", "2023-06-01")
-        .header("content-type", "application/json")
-        .json(&serde_json::json!({
-            "model": use_model,
-            "max_tokens": 4096,
-            "system": system_prompt,
-            "messages": [{"role": "user", "content": user_prompt}]
-        }))
-        .send()
-        .await;
-
-    match response {
-        Ok(res) => {
-            if res.status().is_success() {
-                let body: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
-
-                let polished_text = match extract_anthropic_message_text(&body) {
-                    Ok(text) => text.trim().to_string(),
-                    Err(parse_err) => {
-                        return Ok(PolishResponse {
-                            success: false,
-                            polished_text: None,
-                            detected_language: None,
-                            token_usage: None,
-                            error: Some(TranslateError {
-                                code: "API_ERROR".to_string(),
-                                message: format!("Invalid API response: {}", parse_err),
-                            }),
-                        });
-                    }
-                };
-
-                let input_tokens = body["usage"]["input_tokens"].as_i64().map(|v| v as i32);
-                let output_tokens = body["usage"]["output_tokens"].as_i64().map(|v| v as i32);
-
-                Ok(PolishResponse {
-                    success: true,
-                    polished_text: Some(polished_text),
-                    detected_language: Some(detected_lang),
-                    token_usage: match (input_tokens, output_tokens) {
-                        (Some(i), Some(o)) => Some(TokenUsage {
-                            input_tokens: i,
-                            output_tokens: o,
-                        }),
-                        _ => None,
-                    },
-                    error: None,
-                })
-            } else if res.status().as_u16() == 401 {
-                Ok(PolishResponse {
-                    success: false,
-                    polished_text: None,
-                    detected_language: None,
-                    token_usage: None,
-                    error: Some(TranslateError {
-                        code: "INVALID_API_KEY".to_string(),
-                        message: "Invalid API key".to_string(),
-                    }),
-                })
-            } else {
-                Ok(PolishResponse {
-                    success: false,
-                    polished_text: None,
-                    detected_language: None,
-                    token_usage: None,
-                    error: Some(TranslateError {
-                        code: "API_ERROR".to_string(),
-                        message: format!("API error: {}", res.status()),
-                    }),
-                })
-            }
+    let model_profile_id = effective_model_profile_id(&settings, model.as_ref());
+    let resolved = match resolve_ai_request(
+        db,
+        &settings,
+        model_profile_id,
+        Some(system_prompt),
+        user_prompt,
+    )
+    .await
+    {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            return Ok(PolishResponse {
+                success: false,
+                polished_text: None,
+                detected_language: None,
+                token_usage: None,
+                error: Some(error),
+            });
         }
-        Err(e) => Ok(PolishResponse {
-            success: false,
-            polished_text: None,
-            detected_language: None,
-            token_usage: None,
-            error: Some(TranslateError {
-                code: "NETWORK_ERROR".to_string(),
-                message: format!("Network error: {}", e),
-            }),
-        }),
-    }
+    };
+
+    let response = match AiRuntime::default().complete(resolved).await {
+        Ok(response) => response,
+        Err(err) => {
+            return Ok(PolishResponse {
+                success: false,
+                polished_text: None,
+                detected_language: None,
+                token_usage: None,
+                error: Some(map_ai_error(err)),
+            });
+        }
+    };
+
+    Ok(PolishResponse {
+        success: true,
+        polished_text: Some(response.text.trim().to_string()),
+        detected_language: Some(detected_lang),
+        token_usage: response_token_usage(response.input_tokens, response.output_tokens),
+        error: None,
+    })
 }
 
 #[tauri::command]
@@ -217,22 +239,6 @@ pub async fn polish_stream(
     let db = &state.db;
     let settings = db.get_settings().await.map_err(|e| e.to_string())?;
 
-    // Get API key from Keychain (with SQLite fallback)
-    let api_key = match keychain::resolve_api_key(&settings.api_key) {
-        Some(key) => key,
-        _ => {
-            emit_polish_stream_event(
-                &on_event,
-                PolishStreamEvent::Error {
-                    code: "INVALID_API_KEY".to_string(),
-                    message: "API key not configured. Please set your Claude API key in Settings."
-                        .to_string(),
-                },
-            );
-            return Ok(());
-        }
-    };
-
     // Detect language
     let detected_lang = detect_language(&text);
 
@@ -244,9 +250,6 @@ pub async fn polish_stream(
         },
     );
 
-    // Use provided model or fall back to settings
-    let use_model = model.unwrap_or_else(|| settings.preferred_model.clone());
-
     // Build prompts using the prompts module
     let system_prompt = if detected_lang == "ko" {
         prompts::polish::build_system_prompt()
@@ -257,93 +260,57 @@ pub async fn polish_stream(
     let user_prompt =
         prompts::polish::build_user_prompt(&text, &context, &channel, &options, &detected_lang);
 
-    // Call Claude API with streaming
-    let client = anthropic_http_client();
-    let messages_url = anthropic_messages_url(&settings.anthropic_base_url)?;
-    let response = client
-        .post(messages_url)
-        .header("x-api-key", &api_key)
-        .header("anthropic-version", "2023-06-01")
-        .header("content-type", "application/json")
-        .json(&serde_json::json!({
-            "model": use_model,
-            "max_tokens": 4096,
-            "stream": true,
-            "system": system_prompt,
-            "messages": [{"role": "user", "content": user_prompt}]
-        }))
-        .send()
-        .await;
-
-    match response {
-        Ok(res) => {
-            if res.status().as_u16() == 401 {
-                emit_polish_stream_event(
-                    &on_event,
-                    PolishStreamEvent::Error {
-                        code: "INVALID_API_KEY".to_string(),
-                        message: "Invalid API key".to_string(),
-                    },
-                );
-                return Ok(());
-            }
-
-            if !res.status().is_success() {
-                emit_polish_stream_event(
-                    &on_event,
-                    PolishStreamEvent::Error {
-                        code: "API_ERROR".to_string(),
-                        message: format!("API error: {}", res.status()),
-                    },
-                );
-                return Ok(());
-            }
-
-            let stream_result = stream_anthropic_sse(res, |delta| {
-                emit_polish_stream_event(
-                    &on_event,
-                    PolishStreamEvent::Delta {
-                        text: delta.to_string(),
-                    },
-                );
-            })
-            .await;
-
-            let (full_text, input_tokens, output_tokens) = match stream_result {
-                Ok(result) => (result.full_text, result.input_tokens, result.output_tokens),
-                Err(err) => {
-                    emit_polish_stream_event(
-                        &on_event,
-                        PolishStreamEvent::Error {
-                            code: "STREAM_ERROR".to_string(),
-                            message: err,
-                        },
-                    );
-                    return Ok(());
-                }
-            };
-
-            // Send Completed event
-            emit_polish_stream_event(
-                &on_event,
-                PolishStreamEvent::Completed {
-                    full_text: full_text.trim().to_string(),
-                    token_usage: match (input_tokens, output_tokens) {
-                        (Some(i), Some(o)) => Some(TokenUsage {
-                            input_tokens: i,
-                            output_tokens: o,
-                        }),
-                        _ => None,
-                    },
-                },
-            );
-        }
-        Err(e) => {
+    let model_profile_id = effective_model_profile_id(&settings, model.as_ref());
+    let resolved = match resolve_ai_request(
+        db,
+        &settings,
+        model_profile_id,
+        Some(system_prompt),
+        user_prompt,
+    )
+    .await
+    {
+        Ok(resolved) => resolved,
+        Err(error) => {
             emit_polish_stream_event(
                 &on_event,
                 PolishStreamEvent::Error {
-                    code: "NETWORK_ERROR".to_string(),
-                    message: format!("Network error: {}", e),
+                    code: error.code,
+                    message: error.message,
+                },
+            );
+            return Ok(());
+        }
+    };
+
+    let response = AiRuntime::default()
+        .stream(resolved, |event| match event {
+            AiStreamEvent::Delta { text } => {
+                emit_polish_stream_event(&on_event, PolishStreamEvent::Delta { text })
+            }
+        })
+        .await;
+
+    match response {
+        Ok(response) => {
+            emit_polish_stream_event(
+                &on_event,
+                PolishStreamEvent::Completed {
+                    full_text: response.text.trim().to_string(),
+                    token_usage: response_token_usage(
+                        response.input_tokens,
+                        response.output_tokens,
+                    ),
+                },
+            );
+        }
+        Err(err) => {
+            let error = map_ai_error(err);
+            emit_polish_stream_event(
+                &on_event,
+                PolishStreamEvent::Error {
+                    code: error.code,
+                    message: error.message,
                 },
             );
         }

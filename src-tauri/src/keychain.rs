@@ -1,6 +1,7 @@
 // Keep legacy service name to preserve previously stored API keys.
 const KEYCHAIN_SERVICE: &str = "com.transclip.app";
 const KEYCHAIN_ACCOUNT: &str = "api_key";
+const AI_PROVIDER_KEYCHAIN_SERVICE: &str = "trans-clip.ai-provider";
 
 /// Store API key in macOS Keychain
 pub fn store_api_key(api_key: &str) -> Result<(), String> {
@@ -76,6 +77,82 @@ pub fn delete_api_key_from_keychain() -> Result<(), String> {
     }
 }
 
+pub fn store_ai_api_key(account: &str, api_key: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use security_framework::passwords::{delete_generic_password, set_generic_password};
+
+        let _ = delete_generic_password(AI_PROVIDER_KEYCHAIN_SERVICE, account);
+        set_generic_password(AI_PROVIDER_KEYCHAIN_SERVICE, account, api_key.as_bytes())
+            .map_err(|e| format!("Failed to store provider API key in Keychain: {}", e))
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = account;
+        let _ = api_key;
+        Err("Keychain is only supported on macOS".to_string())
+    }
+}
+
+pub fn get_ai_api_key(account: &str) -> Result<Option<String>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        use security_framework::passwords::get_generic_password;
+
+        match get_generic_password(AI_PROVIDER_KEYCHAIN_SERVICE, account) {
+            Ok(bytes) => {
+                let key = String::from_utf8(bytes.to_vec())
+                    .map_err(|e| format!("Invalid UTF-8 in provider Keychain item: {}", e))?;
+                Ok(Some(key))
+            }
+            Err(e) => {
+                if e.code() == -25300 {
+                    Ok(None)
+                } else {
+                    Err(format!(
+                        "Failed to read provider API key from Keychain: {}",
+                        e
+                    ))
+                }
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = account;
+        Ok(None)
+    }
+}
+
+pub fn delete_ai_api_key(account: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use security_framework::passwords::delete_generic_password;
+
+        match delete_generic_password(AI_PROVIDER_KEYCHAIN_SERVICE, account) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                if e.code() == -25300 {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "Failed to delete provider API key from Keychain: {}",
+                        e
+                    ))
+                }
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = account;
+        Ok(())
+    }
+}
+
 /// Migrate API key from SQLite to Keychain (for backward compatibility)
 /// Returns true if migration occurred
 pub async fn migrate_api_key_from_db(db: &crate::database::Database) -> bool {
@@ -130,6 +207,28 @@ pub fn resolve_api_key(settings_api_key: &Option<String>) -> Option<String> {
 
     // Fallback to settings (SQLite)
     settings_api_key.as_ref().filter(|k| !k.is_empty()).cloned()
+}
+
+pub fn resolve_ai_api_key(
+    provider_config: &crate::ai::ProviderConfig,
+    settings_api_key: &Option<String>,
+) -> Option<String> {
+    let account = crate::ai::api_key_account_for_provider(provider_config);
+    match get_ai_api_key(&account) {
+        Ok(Some(key)) => return Some(key),
+        Ok(None) => {}
+        Err(e) => {
+            log::warn!("Provider Keychain read failed for {}: {}", account, e);
+        }
+    }
+
+    if provider_config.provider_kind == crate::ai::ProviderKind::Anthropic
+        && provider_config.endpoint_mode == crate::ai::EndpointMode::Public
+    {
+        resolve_api_key(settings_api_key)
+    } else {
+        None
+    }
 }
 
 /// Validate the API key by making a test request to the Claude API

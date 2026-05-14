@@ -1,18 +1,39 @@
+use crate::ai::{
+    normalize_provider_base_url, EndpointMode, ProviderKind, CUSTOM_ENDPOINT_API_KEY_ACCOUNT,
+};
+use crate::database::AiModelProfileRow;
 use crate::keychain;
 use crate::utils::streaming::normalize_anthropic_base_url;
 use crate::AppState;
 use tauri::State;
 
 use super::types::{
-    ApiKeyStatus, DeleteResponse, ErrorDetail, SetApiKeyResponse, UpdateSettingsRequest,
-    UserSettingsResponse,
+    AddAiModelProfileRequest, AiApiKeyRequest, ApiKeyStatus, DeleteResponse, ErrorDetail,
+    SetApiKeyResponse, UpdateAiModelProfileRequest, UpdateAiProviderConfigRequest,
+    UpdateSettingsRequest, UserSettingsResponse,
 };
 
 #[tauri::command]
 pub async fn get_settings(state: State<'_, AppState>) -> Result<UserSettingsResponse, String> {
+    load_settings_response(&state).await
+}
+
+async fn load_settings_response(
+    state: &State<'_, AppState>,
+) -> Result<UserSettingsResponse, String> {
     let db = &state.db;
     let settings = db.get_settings().await.map_err(|e| e.to_string())?;
-    Ok(UserSettingsResponse::from(settings))
+    let providers = db
+        .get_ai_provider_configs()
+        .await
+        .map_err(|e| e.to_string())?;
+    let models = db
+        .get_ai_model_profiles()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(UserSettingsResponse::from_parts(
+        settings, providers, models,
+    ))
 }
 
 #[tauri::command]
@@ -73,12 +94,201 @@ pub async fn update_settings(
     if let Some(v) = settings.anthropic_base_url {
         current.anthropic_base_url = normalize_anthropic_base_url(&v)?;
     }
+    if let Some(v) = settings.preferred_model_profile_id {
+        current.preferred_model_profile_id = Some(v);
+    }
 
     db.update_settings(&current)
         .await
         .map_err(|e| e.to_string())?;
 
-    Ok(UserSettingsResponse::from(current))
+    load_settings_response(&state).await
+}
+
+#[tauri::command]
+pub async fn update_ai_provider_config(
+    state: State<'_, AppState>,
+    request: UpdateAiProviderConfigRequest,
+) -> Result<UserSettingsResponse, String> {
+    let db = &state.db;
+    let provider = db
+        .get_ai_provider_config(&request.id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Provider config not found".to_string())?;
+    let provider_kind = ProviderKind::from_db_value(&provider.provider_kind)
+        .ok_or_else(|| "Invalid provider kind".to_string())?;
+    let endpoint_mode = EndpointMode::from_db_value(&request.endpoint_mode)
+        .ok_or_else(|| "Invalid endpoint mode".to_string())?;
+    let base_url = if endpoint_mode == EndpointMode::Public {
+        provider_kind.default_base_url().to_string()
+    } else {
+        normalize_provider_base_url(provider_kind, &request.base_url)?
+    };
+
+    db.update_ai_provider_config(
+        &request.id,
+        endpoint_mode.as_db_value(),
+        &base_url,
+        request.enabled,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    load_settings_response(&state).await
+}
+
+#[tauri::command]
+pub async fn add_ai_model_profile(
+    state: State<'_, AppState>,
+    request: AddAiModelProfileRequest,
+) -> Result<UserSettingsResponse, String> {
+    let db = &state.db;
+    let provider = db
+        .get_ai_provider_config(&request.provider_config_id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Provider config not found".to_string())?;
+    let provider_kind = ProviderKind::from_db_value(&provider.provider_kind)
+        .ok_or_else(|| "Invalid provider kind".to_string())?;
+    let display_name = request.display_name.trim();
+    let model_id = request.model_id.trim();
+    if display_name.is_empty() || model_id.is_empty() {
+        return Err("Model display name and model id are required".to_string());
+    }
+
+    let profile = AiModelProfileRow {
+        id: uuid::Uuid::new_v4().to_string(),
+        provider_config_id: request.provider_config_id,
+        display_name: display_name.to_string(),
+        model_id: model_id.to_string(),
+        api_interface: provider_kind
+            .default_api_interface()
+            .as_db_value()
+            .to_string(),
+        supports_streaming: 1,
+        max_output_tokens: 4096,
+        sort_order: 1000,
+        created_at: String::new(),
+        updated_at: String::new(),
+    };
+
+    db.insert_ai_model_profile(&profile)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    load_settings_response(&state).await
+}
+
+#[tauri::command]
+pub async fn update_ai_model_profile(
+    state: State<'_, AppState>,
+    request: UpdateAiModelProfileRequest,
+) -> Result<UserSettingsResponse, String> {
+    let db = &state.db;
+    let provider = db
+        .get_ai_provider_config(&request.provider_config_id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Provider config not found".to_string())?;
+    let provider_kind = ProviderKind::from_db_value(&provider.provider_kind)
+        .ok_or_else(|| "Invalid provider kind".to_string())?;
+    let existing = db
+        .get_ai_model_profile(&request.id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Model profile not found".to_string())?;
+
+    let profile = AiModelProfileRow {
+        id: request.id,
+        provider_config_id: request.provider_config_id,
+        display_name: request.display_name.trim().to_string(),
+        model_id: request.model_id.trim().to_string(),
+        api_interface: provider_kind
+            .default_api_interface()
+            .as_db_value()
+            .to_string(),
+        supports_streaming: if request.supports_streaming { 1 } else { 0 },
+        max_output_tokens: request.max_output_tokens.clamp(1, 32768),
+        sort_order: existing.sort_order,
+        created_at: existing.created_at,
+        updated_at: existing.updated_at,
+    };
+
+    if profile.display_name.is_empty() || profile.model_id.is_empty() {
+        return Err("Model display name and model id are required".to_string());
+    }
+
+    db.update_ai_model_profile(&profile)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    load_settings_response(&state).await
+}
+
+#[tauri::command]
+pub async fn delete_ai_model_profile(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<UserSettingsResponse, String> {
+    let db = &state.db;
+    let settings = db.get_settings().await.map_err(|e| e.to_string())?;
+    if settings.preferred_model_profile_id.as_deref() == Some(id.as_str()) {
+        return Err("Cannot delete the preferred model profile".to_string());
+    }
+
+    db.delete_ai_model_profile(&id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    load_settings_response(&state).await
+}
+
+#[tauri::command]
+pub async fn get_ai_api_key(request: AiApiKeyRequest) -> Result<ApiKeyStatus, String> {
+    let exists = keychain::get_ai_api_key(&request.account)?.is_some();
+    Ok(ApiKeyStatus {
+        exists,
+        is_valid: None,
+        last_validated: None,
+    })
+}
+
+#[tauri::command]
+pub async fn set_ai_api_key(
+    request: AiApiKeyRequest,
+    api_key: String,
+) -> Result<SetApiKeyResponse, String> {
+    let api_key = api_key.trim().to_string();
+    if !crate::database::Database::validate_api_key_format(&api_key) {
+        return Ok(SetApiKeyResponse {
+            success: false,
+            is_valid: false,
+            error: Some(ErrorDetail {
+                code: "INVALID_KEY".to_string(),
+                message: "Invalid API key format.".to_string(),
+            }),
+        });
+    }
+
+    keychain::store_ai_api_key(&request.account, &api_key)?;
+    Ok(SetApiKeyResponse {
+        success: true,
+        is_valid: true,
+        error: None,
+    })
+}
+
+#[tauri::command]
+pub async fn delete_ai_api_key(request: AiApiKeyRequest) -> Result<DeleteResponse, String> {
+    if request.account == CUSTOM_ENDPOINT_API_KEY_ACCOUNT {
+        log::info!("Deleting shared custom endpoint API key");
+    }
+    keychain::delete_ai_api_key(&request.account)?;
+    Ok(DeleteResponse {
+        success: true,
+        error: None,
+    })
 }
 
 #[tauri::command]

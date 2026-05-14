@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PolishPopup } from "./PolishPopup";
 import { TranslationPopup } from "./TranslationPopup";
 import { usePolishStore, useSettingsStore } from "@/store";
-import type { ClaudeModel, UserSettings } from "@/types";
+import type { UserSettings } from "@/types";
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -45,10 +45,11 @@ vi.mock("@/hooks/usePolishStream", () => ({
   }),
 }));
 
-function makeSettings(preferredModel: ClaudeModel): UserSettings {
+function makeSettings(preferredModelProfileId: string): UserSettings {
   return {
     maxHistoryCount: 50,
-    preferredModel,
+    preferredModel: preferredModelProfileId.replace("anthropic:", ""),
+    preferredModelProfileId,
     autoDetectLanguage: true,
     doublePressInterval: 500,
     translationCacheDays: 30,
@@ -56,7 +57,50 @@ function makeSettings(preferredModel: ClaudeModel): UserSettings {
     popupPosition: "cursor",
     launchAtLogin: false,
     pasteDelayMs: 120,
-    anthropicBaseUrl: "https://api.anthropic.com",
+    anthropicBaseUrl: "https://api.anthropic.com/v1",
+    aiProviderConfigs: [
+      {
+        id: "anthropic",
+        displayName: "Anthropic",
+        providerKind: "anthropic",
+        endpointMode: "public",
+        baseUrl: "https://api.anthropic.com/v1",
+        authScheme: "x_api_key",
+        enabled: true,
+      },
+    ],
+    aiModelProfiles: [
+      {
+        id: "anthropic:claude-opus-4-7",
+        providerConfigId: "anthropic",
+        displayName: "Claude Opus 4.7",
+        modelId: "claude-opus-4-7",
+        apiInterface: "anthropic_messages",
+        supportsStreaming: true,
+        maxOutputTokens: 4096,
+        sortOrder: 10,
+      },
+      {
+        id: "anthropic:claude-sonnet-4-6",
+        providerConfigId: "anthropic",
+        displayName: "Claude Sonnet 4.6",
+        modelId: "claude-sonnet-4-6",
+        apiInterface: "anthropic_messages",
+        supportsStreaming: true,
+        maxOutputTokens: 4096,
+        sortOrder: 20,
+      },
+      {
+        id: "anthropic:claude-haiku-4-5-20251001",
+        providerConfigId: "anthropic",
+        displayName: "Claude Haiku 4.5",
+        modelId: "claude-haiku-4-5-20251001",
+        apiInterface: "anthropic_messages",
+        supportsStreaming: true,
+        maxOutputTokens: 4096,
+        sortOrder: 30,
+      },
+    ],
   };
 }
 
@@ -68,8 +112,9 @@ describe("popup model selectors", () => {
     mocks.handleDragStart.mockReset();
 
     useSettingsStore.setState({
-      settings: makeSettings("claude-haiku-4-5-20251001"),
+      settings: makeSettings("anthropic:claude-haiku-4-5-20251001"),
       apiKeyStatus: null,
+      aiApiKeyStatus: {},
       isLoading: false,
       error: null,
     });
@@ -84,22 +129,22 @@ describe("popup model selectors", () => {
   it("shows the configured translation default as a real model option", () => {
     render(<TranslationPopup sourceText="hello" onClose={vi.fn()} />);
 
-    const modelSelect = screen.getByDisplayValue("Haiku 4.5 (기본, 가장 빠름)");
+    const modelSelect = screen.getByDisplayValue("Anthropic - Claude Haiku 4.5 (기본)");
     expect(screen.queryByRole("option", { name: "기본값" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "다시 번역" }));
     expect(mocks.translate).toHaveBeenLastCalledWith("hello", undefined);
 
-    fireEvent.change(modelSelect, { target: { value: "claude-opus-4-7" } });
+    fireEvent.change(modelSelect, { target: { value: "anthropic:claude-opus-4-7" } });
     fireEvent.click(screen.getByRole("button", { name: "다시 번역" }));
-    expect(mocks.translate).toHaveBeenLastCalledWith("hello", "claude-opus-4-7");
+    expect(mocks.translate).toHaveBeenLastCalledWith("hello", "anthropic:claude-opus-4-7");
   });
 
   it("shows the configured polish default as a real model option", () => {
     render(<PolishPopup sourceText="hello" onClose={vi.fn()} />);
 
     const modelSelect = screen.getAllByRole("combobox")[2];
-    expect(modelSelect).toHaveDisplayValue("Haiku 4.5 (기본, 가장 빠름)");
+    expect(modelSelect).toHaveDisplayValue("Anthropic - Claude Haiku 4.5 (기본)");
     expect(screen.queryByRole("option", { name: "기본값" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "다시 다듬기" }));

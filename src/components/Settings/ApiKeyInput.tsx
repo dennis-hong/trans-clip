@@ -3,13 +3,28 @@ import { useSettingsStore } from "@/store";
 
 interface ApiKeyInputProps {
   hasApiKey: boolean;
+  label?: string;
+  description?: string;
+  account?: string;
 }
 
-export function ApiKeyInput({ hasApiKey }: ApiKeyInputProps) {
+export function ApiKeyInput({
+  hasApiKey,
+  label = "API 키",
+  description = "Provider 또는 custom endpoint에서 발급받은 키를 입력하세요",
+  account,
+}: ApiKeyInputProps) {
   const [apiKey, setApiKey] = useState("");
   const [isEditing, setIsEditing] = useState(!hasApiKey);
   const [showKey, setShowKey] = useState(false);
-  const { setApiKey: saveApiKey, deleteApiKey, isLoading, error } = useSettingsStore();
+  const {
+    setApiKey: saveApiKey,
+    deleteApiKey,
+    setAiApiKey,
+    deleteAiApiKey,
+    isLoading,
+    error,
+  } = useSettingsStore();
 
   // Sync isEditing state when hasApiKey changes
   useEffect(() => {
@@ -21,19 +36,23 @@ export function ApiKeyInput({ hasApiKey }: ApiKeyInputProps) {
   const handleSave = useCallback(async () => {
     if (!apiKey.trim()) return;
 
-    const result = await saveApiKey(apiKey);
+    const result = account
+      ? await setAiApiKey(account, apiKey)
+      : await saveApiKey(apiKey);
     if (result.success) {
       setApiKey("");
       setIsEditing(false);
     }
-  }, [apiKey, saveApiKey]);
+  }, [account, apiKey, saveApiKey, setAiApiKey]);
 
   const handleDelete = useCallback(async () => {
-    const success = await deleteApiKey();
+    const success = account
+      ? await deleteAiApiKey(account)
+      : await deleteApiKey();
     if (success) {
       setIsEditing(true);
     }
-  }, [deleteApiKey]);
+  }, [account, deleteApiKey, deleteAiApiKey]);
 
   const handleCancel = useCallback(() => {
     setApiKey("");
@@ -43,24 +62,24 @@ export function ApiKeyInput({ hasApiKey }: ApiKeyInputProps) {
   if (!isEditing && hasApiKey) {
     return (
       <div className="space-y-2">
-        <label className="block text-xs font-medium text-yellow-700">
-          Claude API 키
+        <label className="block text-xs font-medium text-slate-700">
+          {label}
         </label>
         <div className="flex items-center gap-2">
-          <div className="flex-1 px-2 py-1.5 bg-yellow-50 rounded-md border border-yellow-300">
-            <span className="text-sm text-yellow-700">
+          <div className="flex-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5">
+            <span className="text-sm text-slate-500">
               ••••••••••••••••
             </span>
           </div>
           <button
             onClick={() => setIsEditing(true)}
-            className="px-2 py-1 text-xs font-medium text-yellow-700 bg-yellow-200 hover:bg-yellow-300 rounded transition-colors"
+            className="rounded px-2 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100"
           >
             변경
           </button>
           <button
             onClick={handleDelete}
-            className="px-2 py-1 text-xs text-yellow-600 hover:bg-yellow-200 rounded transition-colors"
+            className="rounded px-2 py-1 text-xs text-red-600 transition-colors hover:bg-red-50"
           >
             삭제
           </button>
@@ -77,21 +96,21 @@ export function ApiKeyInput({ hasApiKey }: ApiKeyInputProps) {
 
   return (
     <div className="space-y-2">
-      <label className="block text-xs font-medium text-yellow-700">
-        Claude API 키
+      <label className="block text-xs font-medium text-slate-700">
+        {label}
       </label>
       <div className="relative">
         <input
           type={showKey ? "text" : "password"}
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
-          placeholder="sk-ant-... 또는 sk-..."
-          className="w-full px-2 py-1.5 pr-8 bg-white rounded-md border border-yellow-300 focus:ring-2 focus:ring-yellow-500 focus:border-yellow-400 outline-none text-sm"
+          placeholder="API key"
+          className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 pr-8 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
         />
         <button
           type="button"
           onClick={() => setShowKey(!showKey)}
-          className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-yellow-500 hover:text-yellow-700"
+          className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 transition-colors hover:text-slate-700"
         >
           {showKey ? (
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -108,22 +127,14 @@ export function ApiKeyInput({ hasApiKey }: ApiKeyInputProps) {
       {error && (
         <p className="text-[10px] text-red-600">{error}</p>
       )}
-      <p className="text-[10px] text-yellow-600">
-        <a
-          href="https://console.anthropic.com"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-blue-600 hover:underline"
-        >
-          console.anthropic.com
-        </a>
-        또는 사내 API gateway에서 발급받은 키를 입력하세요
+      <p className="text-[10px] text-slate-500">
+        {description}
       </p>
       <div className="flex items-center gap-2">
         <button
           onClick={handleSave}
           disabled={!apiKey.trim() || isLoading}
-          className="px-3 py-1.5 text-xs font-medium text-white bg-yellow-500 hover:bg-yellow-600 rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
+          className="flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isLoading && (
             <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
@@ -136,7 +147,7 @@ export function ApiKeyInput({ hasApiKey }: ApiKeyInputProps) {
         {hasApiKey && (
           <button
             onClick={handleCancel}
-            className="px-3 py-1.5 text-xs text-yellow-700 hover:bg-yellow-200 rounded-md transition-colors"
+            className="rounded-md px-3 py-1.5 text-xs text-slate-600 transition-colors hover:bg-slate-100"
           >
             취소
           </button>

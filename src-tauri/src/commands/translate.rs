@@ -1,9 +1,9 @@
-use crate::database::TranslationRow;
-use crate::keychain;
-use crate::utils::streaming::{
-    anthropic_http_client, anthropic_messages_url, extract_anthropic_message_text,
-    stream_anthropic_sse,
+use crate::ai::{
+    AiError, AiErrorCode, AiResolvedRequest, AiRuntime, AiStreamEvent, AiTextRequest, ModelProfile,
+    ProviderConfig,
 };
+use crate::database::{TranslationRow, UserSettingsRow};
+use crate::keychain;
 use crate::AppState;
 use tauri::ipc::Channel;
 use tauri::State;
@@ -17,6 +17,95 @@ fn emit_translate_stream_event(
     if let Err(err) = on_event.send(event) {
         log::warn!("Failed to send translate stream event: {}", err);
     }
+}
+
+fn translate_error(code: &str, message: impl Into<String>) -> TranslateError {
+    TranslateError {
+        code: code.to_string(),
+        message: message.into(),
+    }
+}
+
+fn map_ai_error(err: AiError) -> TranslateError {
+    let code = match err.code {
+        AiErrorCode::MissingApiKey | AiErrorCode::InvalidApiKey => "INVALID_API_KEY",
+        AiErrorCode::InvalidEndpoint => "NETWORK_ERROR",
+        AiErrorCode::UnsupportedModel | AiErrorCode::ProviderError => "API_ERROR",
+        AiErrorCode::StreamParseError => "STREAM_ERROR",
+        AiErrorCode::NetworkError => "NETWORK_ERROR",
+    };
+    translate_error(code, err.message)
+}
+
+fn response_token_usage(
+    input_tokens: Option<i32>,
+    output_tokens: Option<i32>,
+) -> Option<TokenUsage> {
+    match (input_tokens, output_tokens) {
+        (Some(i), Some(o)) => Some(TokenUsage {
+            input_tokens: i,
+            output_tokens: o,
+        }),
+        _ => None,
+    }
+}
+
+fn effective_model_profile_id(settings: &UserSettingsRow, model: Option<&String>) -> String {
+    model
+        .cloned()
+        .or_else(|| settings.preferred_model_profile_id.clone())
+        .unwrap_or_else(|| format!("anthropic:{}", settings.preferred_model))
+}
+
+async fn resolve_ai_request(
+    db: &crate::database::Database,
+    settings: &UserSettingsRow,
+    model_profile_id: String,
+    system_prompt: Option<String>,
+    user_prompt: String,
+) -> Result<AiResolvedRequest, TranslateError> {
+    let profile_row = db
+        .get_ai_model_profile(&model_profile_id)
+        .await
+        .map_err(|e| translate_error("API_ERROR", e.to_string()))?
+        .ok_or_else(|| translate_error("API_ERROR", "Selected model profile was not found"))?;
+    let provider_row = db
+        .get_ai_provider_config(&profile_row.provider_config_id)
+        .await
+        .map_err(|e| translate_error("API_ERROR", e.to_string()))?
+        .ok_or_else(|| translate_error("API_ERROR", "Selected provider was not found"))?;
+
+    let provider_config =
+        ProviderConfig::try_from(provider_row).map_err(|e| translate_error("API_ERROR", e))?;
+    if !provider_config.enabled {
+        return Err(translate_error(
+            "API_ERROR",
+            "Selected provider is disabled",
+        ));
+    }
+    let model_profile =
+        ModelProfile::try_from(profile_row).map_err(|e| translate_error("API_ERROR", e))?;
+    let api_key =
+        keychain::resolve_ai_api_key(&provider_config, &settings.api_key).ok_or_else(|| {
+            translate_error(
+                "INVALID_API_KEY",
+                "API key is not configured for the selected provider.",
+            )
+        })?;
+
+    let max_output_tokens = model_profile.max_output_tokens;
+    Ok(AiResolvedRequest {
+        provider_config,
+        model_profile,
+        api_key,
+        request: AiTextRequest {
+            model_profile_id: Some(model_profile_id),
+            system_prompt,
+            user_prompt,
+            max_output_tokens,
+            temperature: None,
+        },
+    })
 }
 
 #[tauri::command]
@@ -76,8 +165,15 @@ pub async fn get_cached_translation(
         }
     });
 
+    let model_profile_id = effective_model_profile_id(&settings, None);
     if let Ok(Some(cached)) = db
-        .find_cached_translation(&text, &src_lang, &tgt_lang, settings.translation_cache_days)
+        .find_cached_translation(
+            &text,
+            &src_lang,
+            &tgt_lang,
+            Some(&model_profile_id),
+            settings.translation_cache_days,
+        )
         .await
     {
         return Ok(Some(TranslateResponse {
@@ -145,26 +241,6 @@ pub async fn translate(
     let db = &state.db;
     let settings = db.get_settings().await.map_err(|e| e.to_string())?;
 
-    // Get API key from Keychain (with SQLite fallback)
-    let api_key = match keychain::resolve_api_key(&settings.api_key) {
-        Some(key) => key,
-        _ => {
-            return Ok(TranslateResponse {
-                success: false,
-                translated_text: None,
-                detected_language: None,
-                from_cache: false,
-                glossary_applied: vec![],
-                token_usage: None,
-                error: Some(TranslateError {
-                    code: "INVALID_API_KEY".to_string(),
-                    message: "API key not configured. Please set your Claude API key in Settings."
-                        .to_string(),
-                }),
-            });
-        }
-    };
-
     // Detect or use provided language
     let src_lang = source_language.unwrap_or_else(|| detect_language(&text));
     let tgt_lang = target_language.unwrap_or_else(|| {
@@ -180,8 +256,15 @@ pub async fn translate(
 
     // Check cache first (skip cache if explicit model is provided)
     if !explicit_model {
+        let model_profile_id = effective_model_profile_id(&settings, model.as_ref());
         if let Ok(Some(cached)) = db
-            .find_cached_translation(&text, &src_lang, &tgt_lang, settings.translation_cache_days)
+            .find_cached_translation(
+                &text,
+                &src_lang,
+                &tgt_lang,
+                Some(&model_profile_id),
+                settings.translation_cache_days,
+            )
             .await
         {
             return Ok(TranslateResponse {
@@ -222,11 +305,7 @@ pub async fn translate(
         )
     };
 
-    // Use provided model or fall back to settings
-    let use_model = model.unwrap_or_else(|| settings.preferred_model.clone());
-
-    // Call Claude API
-    let client = anthropic_http_client();
+    let model_profile_id = effective_model_profile_id(&settings, model.as_ref());
     let prompt = format!(
         "Translate the following text from {} to {}. Return only the translated text without any explanation.{}\n\nText to translate:\n{}",
         if src_lang == "ko" { "Korean" } else { "English" },
@@ -235,140 +314,98 @@ pub async fn translate(
         text
     );
 
-    let response = client
-        .post(anthropic_messages_url(&settings.anthropic_base_url)?)
-        .header("x-api-key", &api_key)
-        .header("anthropic-version", "2023-06-01")
-        .header("content-type", "application/json")
-        .json(&serde_json::json!({
-            "model": use_model,
-            "max_tokens": 4096,
-            "messages": [{"role": "user", "content": prompt}]
-        }))
-        .send()
-        .await;
-
-    match response {
-        Ok(res) => {
-            if res.status().is_success() {
-                let body: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
-
-                let translated_text = match extract_anthropic_message_text(&body) {
-                    Ok(text) => text,
-                    Err(parse_err) => {
-                        return Ok(TranslateResponse {
-                            success: false,
-                            translated_text: None,
-                            detected_language: None,
-                            from_cache: false,
-                            glossary_applied: vec![],
-                            token_usage: None,
-                            error: Some(TranslateError {
-                                code: "API_ERROR".to_string(),
-                                message: format!("Invalid API response: {}", parse_err),
-                            }),
-                        });
-                    }
-                };
-
-                let input_tokens = body["usage"]["input_tokens"].as_i64().map(|v| v as i32);
-                let output_tokens = body["usage"]["output_tokens"].as_i64().map(|v| v as i32);
-
-                let glossary_ids: Vec<String> =
-                    glossary_matches.iter().map(|g| g.id.clone()).collect();
-                let glossary_used = match serde_json::to_string(&glossary_ids) {
-                    Ok(value) => Some(value),
-                    Err(err) => {
-                        log::warn!(
-                            "Failed to serialize glossary IDs for cache entry (non-streaming): {}",
-                            err
-                        );
-                        None
-                    }
-                };
-
-                // Cache the translation
-                let translation = TranslationRow {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    source_text: text,
-                    translated_text: translated_text.clone(),
-                    source_language: src_lang.clone(),
-                    target_language: tgt_lang,
-                    model: use_model,
-                    created_at: chrono::Utc::now().to_rfc3339(),
-                    glossary_used,
-                    input_tokens,
-                    output_tokens,
-                };
-
-                let db = &state.db;
-                if let Err(err) = db.insert_translation(&translation).await {
-                    log::warn!("Failed to cache translation (non-streaming): {}", err);
-                }
-
-                // Update glossary usage counts
-                if !glossary_ids.is_empty() {
-                    if let Err(err) = db.increment_glossary_usage(&glossary_ids).await {
-                        log::warn!("Failed to update glossary usage (non-streaming): {}", err);
-                    }
-                }
-
-                Ok(TranslateResponse {
-                    success: true,
-                    translated_text: Some(translated_text),
-                    detected_language: Some(src_lang),
-                    from_cache: false,
-                    glossary_applied: glossary_ids,
-                    token_usage: match (input_tokens, output_tokens) {
-                        (Some(i), Some(o)) => Some(TokenUsage {
-                            input_tokens: i,
-                            output_tokens: o,
-                        }),
-                        _ => None,
-                    },
-                    error: None,
-                })
-            } else if res.status().as_u16() == 401 {
-                Ok(TranslateResponse {
-                    success: false,
-                    translated_text: None,
-                    detected_language: None,
-                    from_cache: false,
-                    glossary_applied: vec![],
-                    token_usage: None,
-                    error: Some(TranslateError {
-                        code: "INVALID_API_KEY".to_string(),
-                        message: "Invalid API key".to_string(),
-                    }),
-                })
-            } else {
-                Ok(TranslateResponse {
-                    success: false,
-                    translated_text: None,
-                    detected_language: None,
-                    from_cache: false,
-                    glossary_applied: vec![],
-                    token_usage: None,
-                    error: Some(TranslateError {
-                        code: "API_ERROR".to_string(),
-                        message: format!("API error: {}", res.status()),
-                    }),
-                })
-            }
+    let resolved = match resolve_ai_request(db, &settings, model_profile_id, None, prompt).await {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            return Ok(TranslateResponse {
+                success: false,
+                translated_text: None,
+                detected_language: None,
+                from_cache: false,
+                glossary_applied: vec![],
+                token_usage: None,
+                error: Some(error),
+            });
         }
-        Err(e) => Ok(TranslateResponse {
-            success: false,
-            translated_text: None,
-            detected_language: None,
-            from_cache: false,
-            glossary_applied: vec![],
-            token_usage: None,
-            error: Some(TranslateError {
-                code: "NETWORK_ERROR".to_string(),
-                message: format!("Network error: {}", e),
-            }),
-        }),
+    };
+
+    let provider_kind = resolved
+        .provider_config
+        .provider_kind
+        .as_db_value()
+        .to_string();
+    let endpoint_mode = resolved
+        .provider_config
+        .endpoint_mode
+        .as_db_value()
+        .to_string();
+    let provider_config_id = resolved.provider_config.id.clone();
+    let model_profile_id = resolved.model_profile.id.clone();
+    let model_id = resolved.model_profile.model_id.clone();
+
+    let response = match AiRuntime::default().complete(resolved).await {
+        Ok(response) => response,
+        Err(err) => {
+            return Ok(TranslateResponse {
+                success: false,
+                translated_text: None,
+                detected_language: None,
+                from_cache: false,
+                glossary_applied: vec![],
+                token_usage: None,
+                error: Some(map_ai_error(err)),
+            });
+        }
+    };
+
+    let glossary_ids: Vec<String> = glossary_matches.iter().map(|g| g.id.clone()).collect();
+    let glossary_used = match serde_json::to_string(&glossary_ids) {
+        Ok(value) => Some(value),
+        Err(err) => {
+            log::warn!(
+                "Failed to serialize glossary IDs for cache entry (non-streaming): {}",
+                err
+            );
+            None
+        }
+    };
+
+    let translation = TranslationRow {
+        id: uuid::Uuid::new_v4().to_string(),
+        source_text: text,
+        translated_text: response.text.clone(),
+        source_language: src_lang.clone(),
+        target_language: tgt_lang,
+        model: model_id,
+        created_at: chrono::Utc::now().to_rfc3339(),
+        glossary_used,
+        input_tokens: response.input_tokens,
+        output_tokens: response.output_tokens,
+        model_profile_id: Some(model_profile_id),
+        provider_kind: Some(provider_kind),
+        provider_config_id: Some(provider_config_id),
+        endpoint_mode: Some(endpoint_mode),
+    };
+
+    if let Err(err) = db.insert_translation(&translation).await {
+        log::warn!("Failed to cache translation (non-streaming): {}", err);
     }
+
+    if !glossary_ids.is_empty() {
+        if let Err(err) = db.increment_glossary_usage(&glossary_ids).await {
+            log::warn!("Failed to update glossary usage (non-streaming): {}", err);
+        }
+    }
+
+    Ok(TranslateResponse {
+        success: true,
+        translated_text: Some(response.text),
+        detected_language: Some(src_lang),
+        from_cache: false,
+        glossary_applied: glossary_ids,
+        token_usage: response_token_usage(response.input_tokens, response.output_tokens),
+        error: None,
+    })
 }
 
 #[tauri::command]
@@ -406,22 +443,6 @@ pub async fn translate_stream(
     let db = &state.db;
     let settings = db.get_settings().await.map_err(|e| e.to_string())?;
 
-    // Get API key from Keychain (with SQLite fallback)
-    let api_key = match keychain::resolve_api_key(&settings.api_key) {
-        Some(key) => key,
-        _ => {
-            emit_translate_stream_event(
-                &on_event,
-                TranslateStreamEvent::Error {
-                    code: "INVALID_API_KEY".to_string(),
-                    message: "API key not configured. Please set your Claude API key in Settings."
-                        .to_string(),
-                },
-            );
-            return Ok(());
-        }
-    };
-
     // Detect or use provided language
     let src_lang = source_language.unwrap_or_else(|| detect_language(&text));
     let tgt_lang = target_language.unwrap_or_else(|| {
@@ -437,8 +458,15 @@ pub async fn translate_stream(
 
     // Check cache first (skip cache if explicit model is provided)
     if !explicit_model {
+        let model_profile_id = effective_model_profile_id(&settings, model.as_ref());
         if let Ok(Some(cached)) = db
-            .find_cached_translation(&text, &src_lang, &tgt_lang, settings.translation_cache_days)
+            .find_cached_translation(
+                &text,
+                &src_lang,
+                &tgt_lang,
+                Some(&model_profile_id),
+                settings.translation_cache_days,
+            )
             .await
         {
             let glossary_applied: Vec<String> = cached
@@ -504,10 +532,7 @@ pub async fn translate_stream(
         },
     );
 
-    // Use provided model or fall back to settings
-    let use_model = model.unwrap_or_else(|| settings.preferred_model.clone());
-
-    // Build prompt
+    let model_profile_id = effective_model_profile_id(&settings, model.as_ref());
     let prompt = format!(
         "Translate the following text from {} to {}. Return only the translated text without any explanation.{}\n\nText to translate:\n{}",
         if src_lang == "ko" { "Korean" } else { "English" },
@@ -516,131 +541,102 @@ pub async fn translate_stream(
         text
     );
 
-    // Call Claude API with streaming
-    let client = anthropic_http_client();
-    let response = client
-        .post(anthropic_messages_url(&settings.anthropic_base_url)?)
-        .header("x-api-key", &api_key)
-        .header("anthropic-version", "2023-06-01")
-        .header("content-type", "application/json")
-        .json(&serde_json::json!({
-            "model": use_model,
-            "max_tokens": 4096,
-            "stream": true,
-            "messages": [{"role": "user", "content": prompt}]
-        }))
-        .send()
-        .await;
-
-    match response {
-        Ok(res) => {
-            if res.status().as_u16() == 401 {
-                emit_translate_stream_event(
-                    &on_event,
-                    TranslateStreamEvent::Error {
-                        code: "INVALID_API_KEY".to_string(),
-                        message: "Invalid API key".to_string(),
-                    },
-                );
-                return Ok(());
-            }
-
-            if !res.status().is_success() {
-                emit_translate_stream_event(
-                    &on_event,
-                    TranslateStreamEvent::Error {
-                        code: "API_ERROR".to_string(),
-                        message: format!("API error: {}", res.status()),
-                    },
-                );
-                return Ok(());
-            }
-
-            let stream_result = stream_anthropic_sse(res, |delta| {
-                emit_translate_stream_event(
-                    &on_event,
-                    TranslateStreamEvent::Delta {
-                        text: delta.to_string(),
-                    },
-                );
-            })
-            .await;
-
-            let (full_text, input_tokens, output_tokens) = match stream_result {
-                Ok(result) => (result.full_text, result.input_tokens, result.output_tokens),
-                Err(err) => {
-                    emit_translate_stream_event(
-                        &on_event,
-                        TranslateStreamEvent::Error {
-                            code: "STREAM_ERROR".to_string(),
-                            message: err,
-                        },
-                    );
-                    return Ok(());
-                }
-            };
-            let glossary_used = match serde_json::to_string(&glossary_ids) {
-                Ok(value) => Some(value),
-                Err(err) => {
-                    log::warn!(
-                        "Failed to serialize glossary IDs for cache entry (streaming): {}",
-                        err
-                    );
-                    None
-                }
-            };
-
-            // Cache the translation
-            let db = &state.db;
-            let translation = TranslationRow {
-                id: uuid::Uuid::new_v4().to_string(),
-                source_text: text,
-                translated_text: full_text.clone(),
-                source_language: src_lang,
-                target_language: tgt_lang,
-                model: use_model,
-                created_at: chrono::Utc::now().to_rfc3339(),
-                glossary_used,
-                input_tokens,
-                output_tokens,
-            };
-
-            if let Err(err) = db.insert_translation(&translation).await {
-                log::warn!("Failed to cache translation (streaming): {}", err);
-            }
-
-            // Update glossary usage counts
-            if !glossary_ids.is_empty() {
-                if let Err(err) = db.increment_glossary_usage(&glossary_ids).await {
-                    log::warn!("Failed to update glossary usage (streaming): {}", err);
-                }
-            }
-
-            // Send Completed event
-            emit_translate_stream_event(
-                &on_event,
-                TranslateStreamEvent::Completed {
-                    full_text: full_text.clone(),
-                    token_usage: match (input_tokens, output_tokens) {
-                        (Some(i), Some(o)) => Some(TokenUsage {
-                            input_tokens: i,
-                            output_tokens: o,
-                        }),
-                        _ => None,
-                    },
-                },
-            );
-        }
-        Err(e) => {
+    let resolved = match resolve_ai_request(db, &settings, model_profile_id, None, prompt).await {
+        Ok(resolved) => resolved,
+        Err(error) => {
             emit_translate_stream_event(
                 &on_event,
                 TranslateStreamEvent::Error {
-                    code: "NETWORK_ERROR".to_string(),
-                    message: format!("Network error: {}", e),
+                    code: error.code,
+                    message: error.message,
                 },
             );
+            return Ok(());
+        }
+    };
+
+    let provider_kind = resolved
+        .provider_config
+        .provider_kind
+        .as_db_value()
+        .to_string();
+    let endpoint_mode = resolved
+        .provider_config
+        .endpoint_mode
+        .as_db_value()
+        .to_string();
+    let provider_config_id = resolved.provider_config.id.clone();
+    let model_profile_id = resolved.model_profile.id.clone();
+    let model_id = resolved.model_profile.model_id.clone();
+
+    let response = AiRuntime::default()
+        .stream(resolved, |event| match event {
+            AiStreamEvent::Delta { text } => {
+                emit_translate_stream_event(&on_event, TranslateStreamEvent::Delta { text })
+            }
+        })
+        .await;
+
+    let response = match response {
+        Ok(response) => response,
+        Err(err) => {
+            let error = map_ai_error(err);
+            emit_translate_stream_event(
+                &on_event,
+                TranslateStreamEvent::Error {
+                    code: error.code,
+                    message: error.message,
+                },
+            );
+            return Ok(());
+        }
+    };
+
+    let glossary_used = match serde_json::to_string(&glossary_ids) {
+        Ok(value) => Some(value),
+        Err(err) => {
+            log::warn!(
+                "Failed to serialize glossary IDs for cache entry (streaming): {}",
+                err
+            );
+            None
+        }
+    };
+
+    let translation = TranslationRow {
+        id: uuid::Uuid::new_v4().to_string(),
+        source_text: text,
+        translated_text: response.text.clone(),
+        source_language: src_lang,
+        target_language: tgt_lang,
+        model: model_id,
+        created_at: chrono::Utc::now().to_rfc3339(),
+        glossary_used,
+        input_tokens: response.input_tokens,
+        output_tokens: response.output_tokens,
+        model_profile_id: Some(model_profile_id),
+        provider_kind: Some(provider_kind),
+        provider_config_id: Some(provider_config_id),
+        endpoint_mode: Some(endpoint_mode),
+    };
+
+    if let Err(err) = db.insert_translation(&translation).await {
+        log::warn!("Failed to cache translation (streaming): {}", err);
+    }
+
+    if !glossary_ids.is_empty() {
+        if let Err(err) = db.increment_glossary_usage(&glossary_ids).await {
+            log::warn!("Failed to update glossary usage (streaming): {}", err);
         }
     }
+
+    emit_translate_stream_event(
+        &on_event,
+        TranslateStreamEvent::Completed {
+            full_text: response.text,
+            token_usage: response_token_usage(response.input_tokens, response.output_tokens),
+        },
+    );
 
     Ok(())
 }

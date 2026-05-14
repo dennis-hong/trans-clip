@@ -1,3 +1,8 @@
+use crate::ai::{
+    normalize_provider_base_url, ApiInterface, EndpointMode, ProviderKind, ANTHROPIC_PROVIDER_ID,
+    DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_GOOGLE_BASE_URL, DEFAULT_OPENAI_BASE_URL,
+    GOOGLE_PROVIDER_ID, OPENAI_PROVIDER_ID,
+};
 use sqlx::{sqlite::SqlitePoolOptions, Pool, Sqlite};
 use std::path::Path;
 
@@ -28,6 +33,7 @@ impl Database {
         let db = Self { pool };
         db.run_migrations().await?;
         db.ensure_default_settings().await?;
+        db.ensure_ai_provider_defaults().await?;
 
         Ok(db)
     }
@@ -142,6 +148,7 @@ impl Database {
                 launch_at_login INTEGER NOT NULL DEFAULT 0,
                 paste_delay_ms INTEGER NOT NULL DEFAULT 150,
                 anthropic_base_url TEXT NOT NULL DEFAULT 'https://api.anthropic.com',
+                preferred_model_profile_id TEXT,
                 api_key TEXT,
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
@@ -190,6 +197,85 @@ impl Database {
             Err(err) => return Err(err),
         }
 
+        match sqlx::query("ALTER TABLE user_settings ADD COLUMN preferred_model_profile_id TEXT")
+            .execute(&self.pool)
+            .await
+        {
+            Ok(_) => {}
+            Err(err) if is_duplicate_column_error(&err, "preferred_model_profile_id") => {
+                log::debug!("Skipping preferred_model_profile_id migration: column already exists");
+            }
+            Err(err) => return Err(err),
+        }
+
+        for (column, ddl) in [
+            (
+                "model_profile_id",
+                "ALTER TABLE translations ADD COLUMN model_profile_id TEXT",
+            ),
+            (
+                "provider_kind",
+                "ALTER TABLE translations ADD COLUMN provider_kind TEXT",
+            ),
+            (
+                "provider_config_id",
+                "ALTER TABLE translations ADD COLUMN provider_config_id TEXT",
+            ),
+            (
+                "endpoint_mode",
+                "ALTER TABLE translations ADD COLUMN endpoint_mode TEXT",
+            ),
+        ] {
+            match sqlx::query(ddl).execute(&self.pool).await {
+                Ok(_) => {}
+                Err(err) if is_duplicate_column_error(&err, column) => {
+                    log::debug!(
+                        "Skipping translations {} migration: column already exists",
+                        column
+                    );
+                }
+                Err(err) => return Err(err),
+            }
+        }
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS ai_provider_configs (
+                id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                provider_kind TEXT NOT NULL,
+                endpoint_mode TEXT NOT NULL DEFAULT 'public',
+                base_url TEXT NOT NULL,
+                auth_scheme TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS ai_model_profiles (
+                id TEXT PRIMARY KEY,
+                provider_config_id TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                api_interface TEXT NOT NULL,
+                supports_streaming INTEGER NOT NULL DEFAULT 1,
+                max_output_tokens INTEGER NOT NULL DEFAULT 4096,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(provider_config_id) REFERENCES ai_provider_configs(id)
+            )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
         // Migration: replace retired Opus 4.6 setting with current Opus 4.7.
         sqlx::query(
             "UPDATE user_settings SET preferred_model = 'claude-opus-4-7' WHERE preferred_model = 'claude-opus-4-6'",
@@ -233,6 +319,197 @@ impl Database {
             "#,
         )
         .bind(DEFAULT_PREFERRED_MODEL)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn ensure_ai_provider_defaults(&self) -> Result<(), sqlx::Error> {
+        let settings = self.get_settings().await?;
+        let anthropic_base_url =
+            normalize_provider_base_url(ProviderKind::Anthropic, &settings.anthropic_base_url)
+                .unwrap_or_else(|err| {
+                    log::warn!(
+                        "Failed to normalize legacy Anthropic endpoint during AI provider seed: {}",
+                        err
+                    );
+                    DEFAULT_ANTHROPIC_BASE_URL.to_string()
+                });
+        let anthropic_endpoint_mode = if anthropic_base_url == DEFAULT_ANTHROPIC_BASE_URL {
+            EndpointMode::Public
+        } else {
+            EndpointMode::Custom
+        };
+
+        self.ensure_provider_config(
+            ANTHROPIC_PROVIDER_ID,
+            "Anthropic",
+            ProviderKind::Anthropic,
+            anthropic_endpoint_mode,
+            &anthropic_base_url,
+        )
+        .await?;
+        self.ensure_provider_config(
+            OPENAI_PROVIDER_ID,
+            "OpenAI",
+            ProviderKind::OpenAi,
+            EndpointMode::Public,
+            DEFAULT_OPENAI_BASE_URL,
+        )
+        .await?;
+        self.ensure_provider_config(
+            GOOGLE_PROVIDER_ID,
+            "Google Gemini",
+            ProviderKind::Google,
+            EndpointMode::Public,
+            DEFAULT_GOOGLE_BASE_URL,
+        )
+        .await?;
+
+        let preferred_profile_id = format!("anthropic:{}", settings.preferred_model);
+        self.ensure_model_profile(
+            &preferred_profile_id,
+            ANTHROPIC_PROVIDER_ID,
+            &default_anthropic_model_display_name(&settings.preferred_model),
+            &settings.preferred_model,
+            ProviderKind::Anthropic.default_api_interface(),
+            1,
+        )
+        .await?;
+
+        for (id, display_name, model_id, sort_order) in [
+            (
+                "anthropic:claude-opus-4-7",
+                "Claude Opus 4.7",
+                "claude-opus-4-7",
+                10,
+            ),
+            (
+                "anthropic:claude-sonnet-4-6",
+                "Claude Sonnet 4.6",
+                "claude-sonnet-4-6",
+                20,
+            ),
+            (
+                "anthropic:claude-haiku-4-5-20251001",
+                "Claude Haiku 4.5",
+                "claude-haiku-4-5-20251001",
+                30,
+            ),
+        ] {
+            self.ensure_model_profile(
+                id,
+                ANTHROPIC_PROVIDER_ID,
+                display_name,
+                model_id,
+                ProviderKind::Anthropic.default_api_interface(),
+                sort_order,
+            )
+            .await?;
+        }
+
+        for (id, display_name, model_id, sort_order) in [
+            ("openai:gpt-5.5", "GPT 5.5", "gpt-5.5", 100),
+            ("openai:gpt-5.4-mini", "GPT 5.4 Mini", "gpt-5.4-mini", 110),
+        ] {
+            self.ensure_model_profile(
+                id,
+                OPENAI_PROVIDER_ID,
+                display_name,
+                model_id,
+                ProviderKind::OpenAi.default_api_interface(),
+                sort_order,
+            )
+            .await?;
+        }
+
+        for (id, display_name, model_id, sort_order) in [
+            (
+                "google:gemini-2.5-pro",
+                "Gemini 2.5 Pro",
+                "gemini-2.5-pro",
+                200,
+            ),
+            (
+                "google:gemini-2.5-flash",
+                "Gemini 2.5 Flash",
+                "gemini-2.5-flash",
+                210,
+            ),
+        ] {
+            self.ensure_model_profile(
+                id,
+                GOOGLE_PROVIDER_ID,
+                display_name,
+                model_id,
+                ProviderKind::Google.default_api_interface(),
+                sort_order,
+            )
+            .await?;
+        }
+
+        if settings.preferred_model_profile_id.is_none() {
+            sqlx::query(
+                "UPDATE user_settings SET preferred_model_profile_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 'default'",
+            )
+            .bind(preferred_profile_id)
+            .execute(&self.pool)
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn ensure_provider_config(
+        &self,
+        id: &str,
+        display_name: &str,
+        provider_kind: ProviderKind,
+        endpoint_mode: EndpointMode,
+        base_url: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            INSERT OR IGNORE INTO ai_provider_configs
+                (id, display_name, provider_kind, endpoint_mode, base_url, auth_scheme, enabled)
+            VALUES (?, ?, ?, ?, ?, ?, 1)
+            "#,
+        )
+        .bind(id)
+        .bind(display_name)
+        .bind(provider_kind.as_db_value())
+        .bind(endpoint_mode.as_db_value())
+        .bind(base_url)
+        .bind(provider_kind.default_auth_scheme().as_db_value())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn ensure_model_profile(
+        &self,
+        id: &str,
+        provider_config_id: &str,
+        display_name: &str,
+        model_id: &str,
+        api_interface: ApiInterface,
+        sort_order: i32,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            INSERT OR IGNORE INTO ai_model_profiles
+                (id, provider_config_id, display_name, model_id, api_interface, supports_streaming, max_output_tokens, sort_order)
+            VALUES (?, ?, ?, ?, ?, 1, 4096, ?)
+            "#,
+        )
+        .bind(id)
+        .bind(provider_config_id)
+        .bind(display_name)
+        .bind(model_id)
+        .bind(api_interface.as_db_value())
+        .bind(sort_order)
         .execute(&self.pool)
         .await?;
 
@@ -742,24 +1019,49 @@ impl Database {
         source_text: &str,
         source_language: &str,
         target_language: &str,
+        model_profile_id: Option<&str>,
         cache_days: i32,
     ) -> Result<Option<TranslationRow>, sqlx::Error> {
-        sqlx::query_as::<_, TranslationRow>(
-            r#"
-            SELECT id, source_text, translated_text, source_language, target_language, model, created_at, glossary_used, input_tokens, output_tokens
+        if let Some(model_profile_id) = model_profile_id {
+            sqlx::query_as::<_, TranslationRow>(
+                r#"
+            SELECT id, source_text, translated_text, source_language, target_language, model, created_at, glossary_used, input_tokens, output_tokens,
+                   model_profile_id, provider_kind, provider_config_id, endpoint_mode
             FROM translations
             WHERE source_text = ? AND source_language = ? AND target_language = ?
+              AND model_profile_id = ?
               AND created_at > datetime('now', ? || ' days')
             ORDER BY created_at DESC
             LIMIT 1
             "#,
-        )
-        .bind(source_text)
-        .bind(source_language)
-        .bind(target_language)
-        .bind(-cache_days)
-        .fetch_optional(&self.pool)
-        .await
+            )
+            .bind(source_text)
+            .bind(source_language)
+            .bind(target_language)
+            .bind(model_profile_id)
+            .bind(-cache_days)
+            .fetch_optional(&self.pool)
+            .await
+        } else {
+            sqlx::query_as::<_, TranslationRow>(
+                r#"
+            SELECT id, source_text, translated_text, source_language, target_language, model, created_at, glossary_used, input_tokens, output_tokens,
+                   model_profile_id, provider_kind, provider_config_id, endpoint_mode
+            FROM translations
+            WHERE source_text = ? AND source_language = ? AND target_language = ?
+              AND model_profile_id IS NULL
+              AND created_at > datetime('now', ? || ' days')
+            ORDER BY created_at DESC
+            LIMIT 1
+            "#,
+            )
+            .bind(source_text)
+            .bind(source_language)
+            .bind(target_language)
+            .bind(-cache_days)
+            .fetch_optional(&self.pool)
+            .await
+        }
     }
 
     pub async fn insert_translation(
@@ -768,8 +1070,12 @@ impl Database {
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
-            INSERT INTO translations (id, source_text, translated_text, source_language, target_language, model, created_at, glossary_used, input_tokens, output_tokens)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO translations (
+                id, source_text, translated_text, source_language, target_language, model,
+                created_at, glossary_used, input_tokens, output_tokens,
+                model_profile_id, provider_kind, provider_config_id, endpoint_mode
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&translation.id)
@@ -782,6 +1088,10 @@ impl Database {
         .bind(&translation.glossary_used)
         .bind(translation.input_tokens)
         .bind(translation.output_tokens)
+        .bind(&translation.model_profile_id)
+        .bind(&translation.provider_kind)
+        .bind(&translation.provider_config_id)
+        .bind(&translation.endpoint_mode)
         .execute(&self.pool)
         .await?;
 
@@ -808,7 +1118,7 @@ impl Database {
             r#"
             SELECT id, max_history_count, preferred_model, auto_detect_language, double_press_interval,
                    translation_cache_days, show_source_app, popup_position, launch_at_login, paste_delay_ms,
-                   anthropic_base_url, api_key, updated_at
+                   anthropic_base_url, preferred_model_profile_id, api_key, updated_at
             FROM user_settings
             WHERE id = 'default'
             "#,
@@ -831,6 +1141,7 @@ impl Database {
                 launch_at_login = ?,
                 paste_delay_ms = ?,
                 anthropic_base_url = ?,
+                preferred_model_profile_id = ?,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = 'default'
             "#,
@@ -845,9 +1156,161 @@ impl Database {
         .bind(settings.launch_at_login)
         .bind(settings.paste_delay_ms)
         .bind(&settings.anthropic_base_url)
+        .bind(&settings.preferred_model_profile_id)
         .execute(&self.pool)
         .await?;
 
+        Ok(())
+    }
+
+    pub async fn get_ai_provider_configs(&self) -> Result<Vec<AiProviderConfigRow>, sqlx::Error> {
+        sqlx::query_as::<_, AiProviderConfigRow>(
+            r#"
+            SELECT id, display_name, provider_kind, endpoint_mode, base_url, auth_scheme,
+                   enabled, created_at, updated_at
+            FROM ai_provider_configs
+            ORDER BY CASE provider_kind
+                WHEN 'anthropic' THEN 1
+                WHEN 'openai' THEN 2
+                WHEN 'google' THEN 3
+                ELSE 4
+            END
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    pub async fn get_ai_provider_config(
+        &self,
+        id: &str,
+    ) -> Result<Option<AiProviderConfigRow>, sqlx::Error> {
+        sqlx::query_as::<_, AiProviderConfigRow>(
+            r#"
+            SELECT id, display_name, provider_kind, endpoint_mode, base_url, auth_scheme,
+                   enabled, created_at, updated_at
+            FROM ai_provider_configs
+            WHERE id = ?
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub async fn update_ai_provider_config(
+        &self,
+        id: &str,
+        endpoint_mode: &str,
+        base_url: &str,
+        enabled: bool,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE ai_provider_configs
+            SET endpoint_mode = ?, base_url = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            "#,
+        )
+        .bind(endpoint_mode)
+        .bind(base_url)
+        .bind(if enabled { 1 } else { 0 })
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn get_ai_model_profiles(&self) -> Result<Vec<AiModelProfileRow>, sqlx::Error> {
+        sqlx::query_as::<_, AiModelProfileRow>(
+            r#"
+            SELECT id, provider_config_id, display_name, model_id, api_interface,
+                   supports_streaming, max_output_tokens, sort_order, created_at, updated_at
+            FROM ai_model_profiles
+            ORDER BY sort_order ASC, display_name ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    pub async fn get_ai_model_profile(
+        &self,
+        id: &str,
+    ) -> Result<Option<AiModelProfileRow>, sqlx::Error> {
+        sqlx::query_as::<_, AiModelProfileRow>(
+            r#"
+            SELECT id, provider_config_id, display_name, model_id, api_interface,
+                   supports_streaming, max_output_tokens, sort_order, created_at, updated_at
+            FROM ai_model_profiles
+            WHERE id = ?
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub async fn insert_ai_model_profile(
+        &self,
+        profile: &AiModelProfileRow,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO ai_model_profiles (
+                id, provider_config_id, display_name, model_id, api_interface,
+                supports_streaming, max_output_tokens, sort_order
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&profile.id)
+        .bind(&profile.provider_config_id)
+        .bind(&profile.display_name)
+        .bind(&profile.model_id)
+        .bind(&profile.api_interface)
+        .bind(profile.supports_streaming)
+        .bind(profile.max_output_tokens)
+        .bind(profile.sort_order)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn update_ai_model_profile(
+        &self,
+        profile: &AiModelProfileRow,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE ai_model_profiles
+            SET provider_config_id = ?, display_name = ?, model_id = ?, api_interface = ?,
+                supports_streaming = ?, max_output_tokens = ?, sort_order = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            "#,
+        )
+        .bind(&profile.provider_config_id)
+        .bind(&profile.display_name)
+        .bind(&profile.model_id)
+        .bind(&profile.api_interface)
+        .bind(profile.supports_streaming)
+        .bind(profile.max_output_tokens)
+        .bind(profile.sort_order)
+        .bind(&profile.id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn delete_ai_model_profile(&self, id: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("DELETE FROM ai_model_profiles WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -886,9 +1349,9 @@ impl Database {
     }
 
     pub fn validate_api_key_format(api_key: &str) -> bool {
-        // Claude keys start with "sk-ant-"; LiteLLM gateway keys often use "sk-".
+        // Different providers use different key formats, so only reject obviously unusable input.
         let trimmed = api_key.trim();
-        trimmed.starts_with("sk-") && trimmed.len() > 20
+        trimmed.len() > 10 && !trimmed.chars().any(char::is_whitespace)
     }
 
     // ============================================
@@ -972,6 +1435,10 @@ pub struct TranslationRow {
     pub glossary_used: Option<String>,
     pub input_tokens: Option<i32>,
     pub output_tokens: Option<i32>,
+    pub model_profile_id: Option<String>,
+    pub provider_kind: Option<String>,
+    pub provider_config_id: Option<String>,
+    pub endpoint_mode: Option<String>,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -987,8 +1454,45 @@ pub struct UserSettingsRow {
     pub launch_at_login: i32,
     pub paste_delay_ms: i32,
     pub anthropic_base_url: String,
+    pub preferred_model_profile_id: Option<String>,
     pub api_key: Option<String>,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct AiProviderConfigRow {
+    pub id: String,
+    pub display_name: String,
+    pub provider_kind: String,
+    pub endpoint_mode: String,
+    pub base_url: String,
+    pub auth_scheme: String,
+    pub enabled: i32,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct AiModelProfileRow {
+    pub id: String,
+    pub provider_config_id: String,
+    pub display_name: String,
+    pub model_id: String,
+    pub api_interface: String,
+    pub supports_streaming: i32,
+    pub max_output_tokens: i32,
+    pub sort_order: i32,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+fn default_anthropic_model_display_name(model_id: &str) -> String {
+    match model_id {
+        "claude-opus-4-7" => "Claude Opus 4.7".to_string(),
+        "claude-sonnet-4-6" => "Claude Sonnet 4.6".to_string(),
+        "claude-haiku-4-5-20251001" => "Claude Haiku 4.5".to_string(),
+        _ => model_id.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -1058,15 +1562,18 @@ mod tests {
     }
 
     #[test]
-    fn validate_api_key_format_requires_sk_prefix_and_length() {
+    fn validate_api_key_format_rejects_short_or_whitespace_values() {
         assert!(Database::validate_api_key_format(
             "sk-ant-this-is-a-valid-looking-key"
         ));
         assert!(Database::validate_api_key_format(
             "sk-this-is-a-valid-looking-gateway-key"
         ));
-        assert!(!Database::validate_api_key_format("sk-test-short"));
-        assert!(!Database::validate_api_key_format("invalid-prefix-value"));
+        assert!(Database::validate_api_key_format(
+            "AIzaSyValidLookingGoogleKey"
+        ));
+        assert!(!Database::validate_api_key_format("short"));
+        assert!(!Database::validate_api_key_format("key with whitespace"));
     }
 
     #[tokio::test]
@@ -1078,6 +1585,52 @@ mod tests {
 
         assert_eq!(settings.preferred_model, DEFAULT_PREFERRED_MODEL);
         assert_eq!(settings.anthropic_base_url, "https://api.anthropic.com");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn seeds_ai_provider_configs_and_model_profiles() {
+        let path = test_db_path();
+        let db = Database::new(&path).await.expect("db should initialize");
+
+        let settings = db.get_settings().await.expect("should fetch settings");
+        let providers = db
+            .get_ai_provider_configs()
+            .await
+            .expect("should fetch providers");
+        let models = db
+            .get_ai_model_profiles()
+            .await
+            .expect("should fetch model profiles");
+
+        assert_eq!(
+            settings.preferred_model_profile_id.as_deref(),
+            Some("anthropic:claude-sonnet-4-6")
+        );
+        assert!(providers.iter().any(|provider| {
+            provider.id == "anthropic"
+                && provider.provider_kind == "anthropic"
+                && provider.endpoint_mode == "public"
+                && provider.base_url == "https://api.anthropic.com/v1"
+        }));
+        assert!(providers.iter().any(|provider| {
+            provider.id == "openai" && provider.base_url == "https://api.openai.com/v1"
+        }));
+        assert!(providers.iter().any(|provider| {
+            provider.id == "google"
+                && provider.base_url == "https://generativelanguage.googleapis.com/v1beta"
+        }));
+        assert!(models.iter().any(|model| {
+            model.id == "openai:gpt-5.5"
+                && model.provider_config_id == "openai"
+                && model.api_interface == "openai_responses"
+        }));
+        assert!(models.iter().any(|model| {
+            model.id == "google:gemini-2.5-flash"
+                && model.provider_config_id == "google"
+                && model.api_interface == "gemini_generate_content"
+        }));
 
         let _ = std::fs::remove_file(path);
     }
@@ -1121,6 +1674,69 @@ mod tests {
 
         assert_eq!(settings.preferred_model, DEFAULT_PREFERRED_MODEL);
         assert_eq!(settings.anthropic_base_url, "https://api.anthropic.com");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn migrates_legacy_anthropic_endpoint_into_provider_config() {
+        let path = test_db_path();
+        let db_url = format!("sqlite:{}?mode=rwc", path.display());
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&db_url)
+            .await
+            .expect("pool should connect");
+
+        sqlx::query(
+            r#"
+            CREATE TABLE user_settings (
+                id TEXT PRIMARY KEY DEFAULT 'default',
+                max_history_count INTEGER NOT NULL DEFAULT 50,
+                preferred_model TEXT NOT NULL DEFAULT 'claude-haiku-4-5-20251001',
+                auto_detect_language INTEGER NOT NULL DEFAULT 1,
+                double_press_interval INTEGER NOT NULL DEFAULT 500,
+                translation_cache_days INTEGER NOT NULL DEFAULT 7,
+                show_source_app INTEGER NOT NULL DEFAULT 1,
+                popup_position TEXT NOT NULL DEFAULT 'cursor',
+                launch_at_login INTEGER NOT NULL DEFAULT 0,
+                paste_delay_ms INTEGER NOT NULL DEFAULT 150,
+                anthropic_base_url TEXT NOT NULL DEFAULT 'https://api.anthropic.com',
+                api_key TEXT,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("should create legacy user_settings table");
+
+        sqlx::query(
+            r#"
+            INSERT INTO user_settings (id, preferred_model, anthropic_base_url)
+            VALUES ('default', 'claude-haiku-4-5-20251001', 'https://gateway.example/anthropic/v1/messages')
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("should insert legacy settings");
+
+        drop(pool);
+
+        let db = Database::new(&path).await.expect("db should initialize");
+        let settings = db.get_settings().await.expect("should fetch settings");
+        let anthropic = db
+            .get_ai_provider_config("anthropic")
+            .await
+            .expect("should fetch anthropic provider")
+            .expect("anthropic provider should exist");
+
+        assert_eq!(
+            settings.preferred_model_profile_id.as_deref(),
+            Some("anthropic:claude-haiku-4-5-20251001")
+        );
+        assert_eq!(anthropic.endpoint_mode, "custom");
+        assert_eq!(anthropic.base_url, "https://gateway.example/anthropic/v1");
 
         let _ = std::fs::remove_file(path);
     }

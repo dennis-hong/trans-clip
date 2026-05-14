@@ -4,10 +4,9 @@ import { useTranslationStream } from "@/hooks/useTranslationStream";
 import { useWindowDrag } from "@/hooks/useWindowDrag";
 import { useClipboardStore, useSettingsStore } from "@/store";
 import {
-  CLAUDE_MODELS,
-  DEFAULT_CLAUDE_MODEL,
-  formatClaudeModelOption,
-  type ClaudeModel,
+  DEFAULT_MODEL_PROFILE_ID,
+  formatModelProfileOption,
+  type ModelProfileId,
 } from "@/types";
 
 interface TranslationPopupProps {
@@ -36,7 +35,7 @@ export function TranslationPopup({
   const { handleDragStart } = useWindowDrag();
   const [editableText, setEditableText] = useState(sourceText);
   const [isSaved, setIsSaved] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<ClaudeModel | undefined>(undefined);
+  const [selectedModel, setSelectedModel] = useState<ModelProfileId | undefined>(undefined);
   const saveStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heightMeasureTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSuggestedHeightRef = useRef<number | null>(null);
@@ -66,7 +65,9 @@ export function TranslationPopup({
     setEditableText(sourceText);
   }, [sourceText]);
 
-  const defaultModel = settings?.preferredModel ?? DEFAULT_CLAUDE_MODEL;
+  const modelProfiles = settings?.aiModelProfiles ?? [];
+  const providerConfigs = settings?.aiProviderConfigs ?? [];
+  const defaultModel = settings?.preferredModelProfileId ?? DEFAULT_MODEL_PROFILE_ID;
   const displayModel = selectedModel ?? defaultModel;
 
   useEffect(() => {
@@ -139,7 +140,7 @@ export function TranslationPopup({
     }
   }, [editableText, selectedModel, translate]);
 
-  const handleModelChange = (model: ClaudeModel) => {
+  const handleModelChange = (model: ModelProfileId) => {
     setSelectedModel(model === defaultModel ? undefined : model);
   };
 
@@ -403,12 +404,12 @@ export function TranslationPopup({
           <label className="text-[10px] text-gray-500">모델</label>
           <select
             value={displayModel}
-            onChange={(e) => handleModelChange(e.target.value as ClaudeModel)}
+            onChange={(e) => handleModelChange(e.target.value as ModelProfileId)}
             className="px-2 py-1 text-xs bg-white border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           >
-            {CLAUDE_MODELS.map((model) => (
+            {modelProfiles.map((model) => (
               <option key={model.id} value={model.id}>
-                {formatClaudeModelOption(model, defaultModel)}
+                {formatModelProfileOption(model, providerConfigs, defaultModel)}
               </option>
             ))}
           </select>

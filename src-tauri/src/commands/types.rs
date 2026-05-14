@@ -1,4 +1,6 @@
-use crate::database::{ClipboardItemRow, GlossaryEntryRow, UserSettingsRow};
+use crate::database::{
+    AiModelProfileRow, AiProviderConfigRow, ClipboardItemRow, GlossaryEntryRow, UserSettingsRow,
+};
 use serde::{Deserialize, Serialize};
 
 // ============================================
@@ -239,6 +241,7 @@ pub struct ExportGlossaryResponse {
 pub struct UserSettingsResponse {
     pub max_history_count: i32,
     pub preferred_model: String,
+    pub preferred_model_profile_id: Option<String>,
     pub auto_detect_language: bool,
     pub double_press_interval: i32,
     pub translation_cache_days: i32,
@@ -247,13 +250,20 @@ pub struct UserSettingsResponse {
     pub launch_at_login: bool,
     pub paste_delay_ms: i32,
     pub anthropic_base_url: String,
+    pub ai_provider_configs: Vec<AiProviderConfigResponse>,
+    pub ai_model_profiles: Vec<AiModelProfileResponse>,
 }
 
-impl From<UserSettingsRow> for UserSettingsResponse {
-    fn from(row: UserSettingsRow) -> Self {
+impl UserSettingsResponse {
+    pub fn from_parts(
+        row: UserSettingsRow,
+        providers: Vec<AiProviderConfigRow>,
+        models: Vec<AiModelProfileRow>,
+    ) -> Self {
         Self {
             max_history_count: row.max_history_count,
             preferred_model: row.preferred_model,
+            preferred_model_profile_id: row.preferred_model_profile_id,
             auto_detect_language: row.auto_detect_language != 0,
             double_press_interval: row.double_press_interval,
             translation_cache_days: row.translation_cache_days,
@@ -262,6 +272,68 @@ impl From<UserSettingsRow> for UserSettingsResponse {
             launch_at_login: row.launch_at_login != 0,
             paste_delay_ms: row.paste_delay_ms,
             anthropic_base_url: row.anthropic_base_url,
+            ai_provider_configs: providers
+                .into_iter()
+                .map(AiProviderConfigResponse::from)
+                .collect(),
+            ai_model_profiles: models
+                .into_iter()
+                .map(AiModelProfileResponse::from)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiProviderConfigResponse {
+    pub id: String,
+    pub display_name: String,
+    pub provider_kind: String,
+    pub endpoint_mode: String,
+    pub base_url: String,
+    pub auth_scheme: String,
+    pub enabled: bool,
+}
+
+impl From<AiProviderConfigRow> for AiProviderConfigResponse {
+    fn from(row: AiProviderConfigRow) -> Self {
+        Self {
+            id: row.id,
+            display_name: row.display_name,
+            provider_kind: row.provider_kind,
+            endpoint_mode: row.endpoint_mode,
+            base_url: row.base_url,
+            auth_scheme: row.auth_scheme,
+            enabled: row.enabled != 0,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiModelProfileResponse {
+    pub id: String,
+    pub provider_config_id: String,
+    pub display_name: String,
+    pub model_id: String,
+    pub api_interface: String,
+    pub supports_streaming: bool,
+    pub max_output_tokens: i32,
+    pub sort_order: i32,
+}
+
+impl From<AiModelProfileRow> for AiModelProfileResponse {
+    fn from(row: AiModelProfileRow) -> Self {
+        Self {
+            id: row.id,
+            provider_config_id: row.provider_config_id,
+            display_name: row.display_name,
+            model_id: row.model_id,
+            api_interface: row.api_interface,
+            supports_streaming: row.supports_streaming != 0,
+            max_output_tokens: row.max_output_tokens,
+            sort_order: row.sort_order,
         }
     }
 }
@@ -279,6 +351,41 @@ pub struct UpdateSettingsRequest {
     pub launch_at_login: Option<bool>,
     pub paste_delay_ms: Option<i32>,
     pub anthropic_base_url: Option<String>,
+    pub preferred_model_profile_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateAiProviderConfigRequest {
+    pub id: String,
+    pub endpoint_mode: String,
+    pub base_url: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddAiModelProfileRequest {
+    pub provider_config_id: String,
+    pub display_name: String,
+    pub model_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateAiModelProfileRequest {
+    pub id: String,
+    pub provider_config_id: String,
+    pub display_name: String,
+    pub model_id: String,
+    pub supports_streaming: bool,
+    pub max_output_tokens: i32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiApiKeyRequest {
+    pub account: String,
 }
 
 #[derive(Debug, Serialize)]

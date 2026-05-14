@@ -1,5 +1,6 @@
 #![allow(unexpected_cfgs)]
 
+mod ai;
 mod clipboard;
 mod commands;
 mod database;
@@ -367,9 +368,16 @@ pub fn run() {
             // Settings commands
             commands::settings::get_settings,
             commands::settings::update_settings,
+            commands::settings::update_ai_provider_config,
+            commands::settings::add_ai_model_profile,
+            commands::settings::update_ai_model_profile,
+            commands::settings::delete_ai_model_profile,
             commands::settings::get_api_key,
             commands::settings::set_api_key,
             commands::settings::delete_api_key,
+            commands::settings::get_ai_api_key,
+            commands::settings::set_ai_api_key,
+            commands::settings::delete_ai_api_key,
             // System commands
             commands::system::check_accessibility_permission,
             commands::system::request_accessibility_permission,
