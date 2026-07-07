@@ -6,7 +6,7 @@ use crate::ai::{
 use sqlx::{sqlite::SqlitePoolOptions, Pool, Sqlite};
 use std::path::Path;
 
-const DEFAULT_PREFERRED_MODEL: &str = "claude-sonnet-4-6";
+const DEFAULT_PREFERRED_MODEL: &str = "claude-sonnet-5";
 
 pub struct Database {
     pub pool: Pool<Sqlite>,
@@ -139,7 +139,7 @@ impl Database {
             CREATE TABLE IF NOT EXISTS user_settings (
                 id TEXT PRIMARY KEY DEFAULT 'default',
                 max_history_count INTEGER NOT NULL DEFAULT 50,
-                preferred_model TEXT NOT NULL DEFAULT 'claude-sonnet-4-6',
+                preferred_model TEXT NOT NULL DEFAULT 'claude-sonnet-5',
                 auto_detect_language INTEGER NOT NULL DEFAULT 1,
                 double_press_interval INTEGER NOT NULL DEFAULT 500,
                 translation_cache_days INTEGER NOT NULL DEFAULT 7,
@@ -276,9 +276,43 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        // Migration: replace retired Opus 4.6 setting with current Opus 4.7.
+        // Migration: replace retired Anthropic defaults with current model IDs.
+        for (old_model, new_model) in [
+            ("claude-opus-4-6", "claude-opus-4-8"),
+            ("claude-opus-4-7", "claude-opus-4-8"),
+            ("claude-sonnet-4-6", DEFAULT_PREFERRED_MODEL),
+        ] {
+            sqlx::query("UPDATE user_settings SET preferred_model = ? WHERE preferred_model = ?")
+                .bind(new_model)
+                .bind(old_model)
+                .execute(&self.pool)
+                .await?;
+        }
+
+        for (old_profile_id, new_profile_id) in [
+            ("anthropic:claude-opus-4-6", "anthropic:claude-opus-4-8"),
+            ("anthropic:claude-opus-4-7", "anthropic:claude-opus-4-8"),
+            ("anthropic:claude-sonnet-4-6", "anthropic:claude-sonnet-5"),
+        ] {
+            sqlx::query(
+                "UPDATE user_settings SET preferred_model_profile_id = ? WHERE preferred_model_profile_id = ?",
+            )
+            .bind(new_profile_id)
+            .bind(old_profile_id)
+            .execute(&self.pool)
+            .await?;
+        }
+
         sqlx::query(
-            "UPDATE user_settings SET preferred_model = 'claude-opus-4-7' WHERE preferred_model = 'claude-opus-4-6'",
+            r#"
+            DELETE FROM ai_model_profiles
+            WHERE provider_config_id = 'anthropic'
+              AND (
+                (id = 'anthropic:claude-opus-4-6' AND model_id = 'claude-opus-4-6')
+                OR (id = 'anthropic:claude-opus-4-7' AND model_id = 'claude-opus-4-7')
+                OR (id = 'anthropic:claude-sonnet-4-6' AND model_id = 'claude-sonnet-4-6')
+              )
+            "#,
         )
         .execute(&self.pool)
         .await?;
@@ -380,15 +414,15 @@ impl Database {
 
         for (id, display_name, model_id, sort_order) in [
             (
-                "anthropic:claude-opus-4-7",
-                "Claude Opus 4.7",
-                "claude-opus-4-7",
+                "anthropic:claude-opus-4-8",
+                "Claude Opus 4.8",
+                "claude-opus-4-8",
                 10,
             ),
             (
-                "anthropic:claude-sonnet-4-6",
-                "Claude Sonnet 4.6",
-                "claude-sonnet-4-6",
+                "anthropic:claude-sonnet-5",
+                "Claude Sonnet 5",
+                "claude-sonnet-5",
                 20,
             ),
             (
@@ -1488,8 +1522,8 @@ pub struct AiModelProfileRow {
 
 fn default_anthropic_model_display_name(model_id: &str) -> String {
     match model_id {
-        "claude-opus-4-7" => "Claude Opus 4.7".to_string(),
-        "claude-sonnet-4-6" => "Claude Sonnet 4.6".to_string(),
+        "claude-opus-4-8" => "Claude Opus 4.8".to_string(),
+        "claude-sonnet-5" => "Claude Sonnet 5".to_string(),
         "claude-haiku-4-5-20251001" => "Claude Haiku 4.5".to_string(),
         _ => model_id.to_string(),
     }
@@ -1606,7 +1640,7 @@ mod tests {
 
         assert_eq!(
             settings.preferred_model_profile_id.as_deref(),
-            Some("anthropic:claude-sonnet-4-6")
+            Some("anthropic:claude-sonnet-5")
         );
         assert!(providers.iter().any(|provider| {
             provider.id == "anthropic"
@@ -1620,6 +1654,16 @@ mod tests {
         assert!(providers.iter().any(|provider| {
             provider.id == "google"
                 && provider.base_url == "https://generativelanguage.googleapis.com/v1beta"
+        }));
+        assert!(models.iter().any(|model| {
+            model.id == "anthropic:claude-opus-4-8"
+                && model.display_name == "Claude Opus 4.8"
+                && model.model_id == "claude-opus-4-8"
+        }));
+        assert!(models.iter().any(|model| {
+            model.id == "anthropic:claude-sonnet-5"
+                && model.display_name == "Claude Sonnet 5"
+                && model.model_id == "claude-sonnet-5"
         }));
         assert!(models.iter().any(|model| {
             model.id == "openai:gpt-5.5"
@@ -1785,7 +1829,68 @@ mod tests {
         let db = Database::new(&path).await.expect("db should initialize");
         let settings = db.get_settings().await.expect("should fetch settings");
 
-        assert_eq!(settings.preferred_model, "claude-opus-4-7");
+        assert_eq!(settings.preferred_model, "claude-opus-4-8");
+        assert_eq!(
+            settings.preferred_model_profile_id.as_deref(),
+            Some("anthropic:claude-opus-4-8")
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn migrates_retired_sonnet_profile_to_current_default() {
+        let path = test_db_path();
+        let db_url = format!("sqlite:{}?mode=rwc", path.display());
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&db_url)
+            .await
+            .expect("pool should connect");
+
+        sqlx::query(
+            r#"
+            CREATE TABLE user_settings (
+                id TEXT PRIMARY KEY DEFAULT 'default',
+                max_history_count INTEGER NOT NULL DEFAULT 50,
+                preferred_model TEXT NOT NULL DEFAULT 'claude-sonnet-4-6',
+                preferred_model_profile_id TEXT,
+                auto_detect_language INTEGER NOT NULL DEFAULT 1,
+                double_press_interval INTEGER NOT NULL DEFAULT 500,
+                translation_cache_days INTEGER NOT NULL DEFAULT 7,
+                show_source_app INTEGER NOT NULL DEFAULT 1,
+                popup_position TEXT NOT NULL DEFAULT 'cursor',
+                launch_at_login INTEGER NOT NULL DEFAULT 0,
+                paste_delay_ms INTEGER NOT NULL DEFAULT 150,
+                api_key TEXT,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("should create legacy user_settings table");
+
+        sqlx::query(
+            r#"
+            INSERT INTO user_settings (id, preferred_model, preferred_model_profile_id)
+            VALUES ('default', 'claude-sonnet-4-6', 'anthropic:claude-sonnet-4-6')
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("should insert legacy settings");
+
+        drop(pool);
+
+        let db = Database::new(&path).await.expect("db should initialize");
+        let settings = db.get_settings().await.expect("should fetch settings");
+
+        assert_eq!(settings.preferred_model, DEFAULT_PREFERRED_MODEL);
+        assert_eq!(
+            settings.preferred_model_profile_id.as_deref(),
+            Some("anthropic:claude-sonnet-5")
+        );
 
         let _ = std::fs::remove_file(path);
     }

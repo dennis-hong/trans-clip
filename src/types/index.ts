@@ -103,7 +103,7 @@ export interface AiModelProfile {
 /**
  * 기본 모델 프로필
  */
-export const DEFAULT_MODEL_PROFILE_ID = "anthropic:claude-sonnet-4-6";
+export const DEFAULT_MODEL_PROFILE_ID = "anthropic:claude-sonnet-5";
 export const CUSTOM_ENDPOINT_API_KEY_ACCOUNT = "custom-endpoint";
 
 export const PROVIDER_DEFAULT_ENDPOINTS: Record<ProviderKind, string> = {
