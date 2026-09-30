@@ -39,8 +39,6 @@ export function useTranslationStream(
 
   // Ref to accumulate streamed text during a single translate call
   const accumulatedTextRef = useRef("");
-  // Ref to prevent concurrent translate calls
-  const isTranslatingRef = useRef(false);
   // Refs for lifecycle safety and stale-event guards
   const activeChannelRef = useRef<Channel<TranslateStreamEvent> | null>(null);
   const requestIdRef = useRef(0);
@@ -56,7 +54,6 @@ export function useTranslationStream(
 
   const invalidateActiveRequest = useCallback(() => {
     requestIdRef.current += 1;
-    isTranslatingRef.current = false;
     detachActiveChannel();
   }, [detachActiveChannel]);
 
@@ -93,47 +90,26 @@ export function useTranslationStream(
 
   const translate = useCallback(
     async (text: string, model?: string): Promise<void> => {
-      // Prevent concurrent calls
-      if (isTranslatingRef.current) {
-        return;
-      }
-      isTranslatingRef.current = true;
+      // Latest request wins: a newer call (e.g. new source text arriving while the
+      // previous translation is still streaming) supersedes the in-flight one.
       const requestId = ++requestIdRef.current;
       const isStaleRequest = () => !isMountedRef.current || requestId !== requestIdRef.current;
       detachActiveChannel();
       const sourceLanguage = normalizeSourceLanguage(options.sourceLanguage);
 
       setError(null);
+      setIsStreaming(true);
+      setStreamedText("");
+      setFullText("");
+      setFromCache(false);
+      setGlossaryApplied([]);
+      setTokenUsage(null);
+      setDetectedLanguage(null);
+      accumulatedTextRef.current = "";
 
       try {
-        // Fast path: if cached, bypass streaming channel entirely.
-        const cached = await invokeWithTimeout<TranslateResponse | null>("get_cached_translation", {
-          text,
-          sourceLanguage,
-          targetLanguage: options.targetLanguage,
-          model,
-        });
-
-        if (isStaleRequest()) {
-          return;
-        }
-
-        if (cached) {
-          applyTranslateResponse(cached);
-          detachActiveChannel();
-          return;
-        }
-
-        // Streaming path (cache miss)
-        setIsStreaming(true);
-        setStreamedText("");
-        setFullText("");
-        setFromCache(false);
-        setGlossaryApplied([]);
-        setTokenUsage(null);
-        setDetectedLanguage(null);
-        accumulatedTextRef.current = "";
-
+        // The backend answers cache hits through the same stream (started -> completed),
+        // so no separate cache round trip is needed before streaming.
         const channel = new Channel<TranslateStreamEvent>();
         activeChannelRef.current = channel;
         let terminalEventReceived = false;
@@ -232,10 +208,6 @@ export function useTranslationStream(
         setIsStreaming(false);
         if (requestId === requestIdRef.current) {
           detachActiveChannel();
-        }
-      } finally {
-        if (requestId === requestIdRef.current) {
-          isTranslatingRef.current = false;
         }
       }
     },

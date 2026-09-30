@@ -22,14 +22,22 @@ describe("useTranslationStream", () => {
     invokeWithTimeoutMock.mockReset();
   });
 
-  it("uses cache path when cached translation exists", async () => {
-    invokeWithTimeoutMock.mockResolvedValueOnce({
-      success: true,
-      translatedText: "안녕하세요",
-      detectedLanguage: "en",
-      fromCache: true,
-      glossaryApplied: ["g1"],
-      tokenUsage: { inputTokens: 1, outputTokens: 2 },
+  it("shows cached translations delivered through the stream", async () => {
+    invokeWithTimeoutMock.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
+      if (cmd === "translate_stream") {
+        const channel = args.onEvent as {
+          onmessage?: (event: { event: string; data: Record<string, unknown> }) => void;
+        };
+        channel.onmessage?.({
+          event: "started",
+          data: { detectedLanguage: "en", fromCache: true, glossaryApplied: ["g1"] },
+        });
+        channel.onmessage?.({
+          event: "completed",
+          data: { fullText: "안녕하세요", tokenUsage: { inputTokens: 1, outputTokens: 2 } },
+        });
+      }
+      return undefined;
     });
 
     const { result } = renderHook(() => useTranslationStream());
@@ -44,14 +52,18 @@ describe("useTranslationStream", () => {
     expect(result.current.detectedLanguage).toBe("en");
     expect(result.current.glossaryApplied).toEqual(["g1"]);
     expect(result.current.error).toBeNull();
+    expect(result.current.isStreaming).toBe(false);
+    // One IPC round trip: no separate cache lookup before streaming.
     expect(invokeWithTimeoutMock).toHaveBeenCalledTimes(1);
+    expect(invokeWithTimeoutMock).toHaveBeenCalledWith(
+      "translate_stream",
+      expect.objectContaining({ text: "hello" }),
+      120_000
+    );
   });
 
   it("accumulates streaming deltas and completes", async () => {
     invokeWithTimeoutMock.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
-      if (cmd === "get_cached_translation") {
-        return null;
-      }
       if (cmd === "translate_stream") {
         const channel = args.onEvent as {
           onmessage?: (event: {
@@ -95,9 +107,6 @@ describe("useTranslationStream", () => {
 
   it("falls back to non-streaming translate when stream returns without terminal events", async () => {
     invokeWithTimeoutMock.mockImplementation(async (cmd: string) => {
-      if (cmd === "get_cached_translation") {
-        return null;
-      }
       if (cmd === "translate_stream") {
         return undefined;
       }
@@ -133,9 +142,6 @@ describe("useTranslationStream", () => {
 
   it("falls back to non-streaming translate when stream completes with empty text", async () => {
     invokeWithTimeoutMock.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
-      if (cmd === "get_cached_translation") {
-        return null;
-      }
       if (cmd === "translate_stream") {
         const channel = args.onEvent as {
           onmessage?: (event: {
@@ -187,9 +193,6 @@ describe("useTranslationStream", () => {
 
   it("does not stale-out under React StrictMode", async () => {
     invokeWithTimeoutMock.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
-      if (cmd === "get_cached_translation") {
-        return null;
-      }
       if (cmd === "translate_stream") {
         const channel = args.onEvent as {
           onmessage?: (event: {
@@ -230,15 +233,17 @@ describe("useTranslationStream", () => {
     expect(result.current.isStreaming).toBe(false);
   });
 
-  it("ignores concurrent translate calls", async () => {
-    let resolveStream: (() => void) | undefined;
-    invokeWithTimeoutMock.mockImplementation((cmd: string) => {
-      if (cmd === "get_cached_translation") {
-        return Promise.resolve(null);
-      }
+  it("lets the latest translate call supersede an in-flight one", async () => {
+    type Channel = {
+      onmessage?: (event: { event: string; data: Record<string, unknown> }) => void;
+    };
+    const channels: Channel[] = [];
+    const resolvers: Array<() => void> = [];
+    invokeWithTimeoutMock.mockImplementation((cmd: string, args: Record<string, unknown>) => {
       if (cmd === "translate_stream") {
+        channels.push(args.onEvent as Channel);
         return new Promise<void>((resolve) => {
-          resolveStream = resolve;
+          resolvers.push(resolve);
         });
       }
       return Promise.resolve(undefined);
@@ -247,18 +252,38 @@ describe("useTranslationStream", () => {
     const { result } = renderHook(() => useTranslationStream());
 
     let firstPromise: Promise<void> | undefined;
+    let secondPromise: Promise<void> | undefined;
     await act(async () => {
       firstPromise = result.current.translate("first");
       await Promise.resolve();
-      await result.current.translate("second");
+      secondPromise = result.current.translate("second");
+      await Promise.resolve();
     });
 
+    // Both requests reached the backend; the second is not dropped.
     expect(invokeWithTimeoutMock).toHaveBeenCalledTimes(2);
+    expect(invokeWithTimeoutMock).toHaveBeenLastCalledWith(
+      "translate_stream",
+      expect.objectContaining({ text: "second" }),
+      120_000
+    );
 
     await act(async () => {
-      resolveStream?.();
-      await firstPromise;
+      // The superseded stream's late events must be ignored.
+      channels[0].onmessage?.({ event: "delta", data: { text: "stale" } });
+      channels[1].onmessage?.({ event: "delta", data: { text: "fresh" } });
+      channels[1].onmessage?.({
+        event: "completed",
+        data: { fullText: "fresh", tokenUsage: null },
+      });
+      resolvers.forEach((resolve) => resolve());
+      await Promise.all([firstPromise, secondPromise]);
     });
+
+    expect(result.current.streamedText).toBe("fresh");
+    expect(result.current.fullText).toBe("fresh");
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.error).toBeNull();
   });
 
   it("clears active stream handlers when clearResult is called", async () => {
@@ -272,9 +297,6 @@ describe("useTranslationStream", () => {
       | null = null;
 
     invokeWithTimeoutMock.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
-      if (cmd === "get_cached_translation") {
-        return null;
-      }
       if (cmd === "translate_stream") {
         activeChannel = args.onEvent as {
           onmessage?: (event: {
@@ -316,9 +338,6 @@ describe("useTranslationStream", () => {
       | null = null;
 
     invokeWithTimeoutMock.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
-      if (cmd === "get_cached_translation") {
-        return null;
-      }
       if (cmd === "translate_stream") {
         activeChannel = args.onEvent as {
           onmessage?: (event: {

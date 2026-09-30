@@ -40,8 +40,6 @@ export function usePolishStream(): UsePolishStreamReturn {
 
   // Ref to accumulate streamed text during a single polish call
   const accumulatedTextRef = useRef("");
-  // Ref to prevent concurrent polish calls
-  const isPolishingRef = useRef(false);
   // Refs for lifecycle safety and stale-event guards
   const activeChannelRef = useRef<Channel<PolishStreamEvent> | null>(null);
   const requestIdRef = useRef(0);
@@ -57,7 +55,6 @@ export function usePolishStream(): UsePolishStreamReturn {
 
   const invalidateActiveRequest = useCallback(() => {
     requestIdRef.current += 1;
-    isPolishingRef.current = false;
     detachActiveChannel();
   }, [detachActiveChannel]);
 
@@ -98,11 +95,7 @@ export function usePolishStream(): UsePolishStreamReturn {
       options: PolishOption[],
       model?: string
     ): Promise<void> => {
-      // Prevent concurrent calls
-      if (isPolishingRef.current) {
-        return;
-      }
-      isPolishingRef.current = true;
+      // Latest request wins: a newer call supersedes the in-flight one.
       const requestId = ++requestIdRef.current;
       const isStaleRequest = () => !isMountedRef.current || requestId !== requestIdRef.current;
       detachActiveChannel();
@@ -214,10 +207,6 @@ export function usePolishStream(): UsePolishStreamReturn {
         setIsStreaming(false);
         if (requestId === requestIdRef.current) {
           detachActiveChannel();
-        }
-      } finally {
-        if (requestId === requestIdRef.current) {
-          isPolishingRef.current = false;
         }
       }
     },

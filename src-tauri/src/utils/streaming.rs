@@ -35,7 +35,9 @@ pub fn anthropic_http_client() -> &'static reqwest::Client {
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(90))
+            // Not `timeout()`: that caps the whole response, which cuts off long
+            // streams. `read_timeout` only fires when the connection goes silent.
+            .read_timeout(Duration::from_secs(100))
             .build()
             .unwrap_or_else(|err| {
                 log::warn!(

@@ -7,6 +7,14 @@ use serde::{Deserialize, Serialize};
 // Common Types
 // ============================================
 
+/// Maximum number of characters accepted for a single translate/polish request.
+pub const MAX_TEXT_CHARS: usize = 10_000;
+
+/// Counts characters, not bytes: Korean text is 3 bytes per character in UTF-8.
+pub fn exceeds_max_text_length(text: &str) -> bool {
+    text.chars().count() > MAX_TEXT_CHARS
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TokenUsage {
@@ -469,4 +477,17 @@ pub struct CurrentMonitorInfo {
     pub monitor_index: usize,
     pub monitor_width: i32,
     pub saved_window_width: Option<i32>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{exceeds_max_text_length, MAX_TEXT_CHARS};
+
+    #[test]
+    fn counts_characters_not_bytes() {
+        // 9,000 Korean characters are 27,000 bytes but well within the limit.
+        assert!(!exceeds_max_text_length(&"가".repeat(9_000)));
+        assert!(!exceeds_max_text_length(&"a".repeat(MAX_TEXT_CHARS)));
+        assert!(exceeds_max_text_length(&"가".repeat(MAX_TEXT_CHARS + 1)));
+    }
 }

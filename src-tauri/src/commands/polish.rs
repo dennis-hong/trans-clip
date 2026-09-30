@@ -10,7 +10,9 @@ use tauri::ipc::Channel;
 use tauri::State;
 
 use super::translate::detect_language;
-use super::types::{PolishResponse, PolishStreamEvent, TokenUsage, TranslateError};
+use super::types::{
+    exceeds_max_text_length, PolishResponse, PolishStreamEvent, TokenUsage, TranslateError,
+};
 
 fn emit_polish_stream_event(on_event: &Channel<PolishStreamEvent>, event: PolishStreamEvent) {
     if let Err(err) = on_event.send(event) {
@@ -130,7 +132,7 @@ pub async fn polish(
         });
     }
 
-    if text.len() > 10000 {
+    if exceeds_max_text_length(&text) {
         return Ok(PolishResponse {
             success: false,
             polished_text: None,
@@ -225,7 +227,7 @@ pub async fn polish_stream(
         return Ok(());
     }
 
-    if text.len() > 10000 {
+    if exceeds_max_text_length(&text) {
         emit_polish_stream_event(
             &on_event,
             PolishStreamEvent::Error {

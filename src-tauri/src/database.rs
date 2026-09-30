@@ -8,6 +8,13 @@ use std::path::Path;
 
 const DEFAULT_PREFERRED_MODEL: &str = "claude-sonnet-5-5";
 
+/// Room for a full 10,000-character translation (thinking tokens count toward it too).
+const DEFAULT_MAX_OUTPUT_TOKENS: i32 = 16384;
+/// The previous hard-coded default, which truncated long translations.
+const LEGACY_MAX_OUTPUT_TOKENS: i32 = 4096;
+/// SQLite `PRAGMA user_version` value after the max-output-token migration has run.
+const SCHEMA_VERSION_MAX_OUTPUT_TOKENS: i64 = 1;
+
 /// Retired legacy `preferred_model` values and their latest replacements.
 const RETIRED_ANTHROPIC_MODELS: [(&str, &str); 5] = [
     ("claude-opus-4-6", "claude-opus-5-5"),
@@ -20,16 +27,40 @@ const RETIRED_ANTHROPIC_MODELS: [(&str, &str); 5] = [
 /// Retired seeded model profiles as `((provider, model_id), (provider, model_id))`.
 type ModelRef = (&'static str, &'static str);
 const RETIRED_MODELS: [(ModelRef, ModelRef); 10] = [
-    (("anthropic", "claude-opus-4-6"), ("anthropic", "claude-opus-5-5")),
-    (("anthropic", "claude-opus-4-7"), ("anthropic", "claude-opus-5-5")),
-    (("anthropic", "claude-opus-4-8"), ("anthropic", "claude-opus-5-5")),
-    (("anthropic", "claude-sonnet-4-6"), ("anthropic", "claude-sonnet-5-5")),
-    (("anthropic", "claude-sonnet-5"), ("anthropic", "claude-sonnet-5-5")),
+    (
+        ("anthropic", "claude-opus-4-6"),
+        ("anthropic", "claude-opus-5-5"),
+    ),
+    (
+        ("anthropic", "claude-opus-4-7"),
+        ("anthropic", "claude-opus-5-5"),
+    ),
+    (
+        ("anthropic", "claude-opus-4-8"),
+        ("anthropic", "claude-opus-5-5"),
+    ),
+    (
+        ("anthropic", "claude-sonnet-4-6"),
+        ("anthropic", "claude-sonnet-5-5"),
+    ),
+    (
+        ("anthropic", "claude-sonnet-5"),
+        ("anthropic", "claude-sonnet-5-5"),
+    ),
     (("openai", "gpt-5.5"), ("openai", "gpt-6.1-sol")),
     (("openai", "gpt-5.4-mini"), ("openai", "gpt-6-luna")),
-    (("google", "gemini-2.5-pro"), ("google", "gemini-3.1-pro-preview")),
-    (("google", "gemini-2.5-flash"), ("google", "gemini-3.8-flash")),
-    (("google", "gemini-2.0-flash"), ("google", "gemini-3.8-flash")),
+    (
+        ("google", "gemini-2.5-pro"),
+        ("google", "gemini-3.1-pro-preview"),
+    ),
+    (
+        ("google", "gemini-2.5-flash"),
+        ("google", "gemini-3.8-flash"),
+    ),
+    (
+        ("google", "gemini-2.0-flash"),
+        ("google", "gemini-3.8-flash"),
+    ),
 ];
 
 pub struct Database {
@@ -289,7 +320,7 @@ impl Database {
                 model_id TEXT NOT NULL,
                 api_interface TEXT NOT NULL,
                 supports_streaming INTEGER NOT NULL DEFAULT 1,
-                max_output_tokens INTEGER NOT NULL DEFAULT 4096,
+                max_output_tokens INTEGER NOT NULL DEFAULT 16384,
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -503,6 +534,36 @@ impl Database {
             .await?;
         }
 
+        self.raise_legacy_max_output_tokens().await?;
+
+        Ok(())
+    }
+
+    /// One-shot migration: profiles created with the old 4096 default cut long
+    /// translations short. Guarded by `user_version` so a value the user picks in
+    /// settings later is never overwritten again.
+    async fn raise_legacy_max_output_tokens(&self) -> Result<(), sqlx::Error> {
+        let version: i64 = sqlx::query_scalar("PRAGMA user_version")
+            .fetch_one(&self.pool)
+            .await?;
+        if version >= SCHEMA_VERSION_MAX_OUTPUT_TOKENS {
+            return Ok(());
+        }
+
+        sqlx::query(
+            "UPDATE ai_model_profiles SET max_output_tokens = ? WHERE max_output_tokens = ?",
+        )
+        .bind(DEFAULT_MAX_OUTPUT_TOKENS)
+        .bind(LEGACY_MAX_OUTPUT_TOKENS)
+        .execute(&self.pool)
+        .await?;
+        // PRAGMA does not accept bound parameters.
+        sqlx::query(&format!(
+            "PRAGMA user_version = {SCHEMA_VERSION_MAX_OUTPUT_TOKENS}"
+        ))
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
     }
 
@@ -546,7 +607,7 @@ impl Database {
             r#"
             INSERT OR IGNORE INTO ai_model_profiles
                 (id, provider_config_id, display_name, model_id, api_interface, supports_streaming, max_output_tokens, sort_order)
-            VALUES (?, ?, ?, ?, ?, 1, 4096, ?)
+            VALUES (?, ?, ?, ?, ?, 1, ?, ?)
             "#,
         )
         .bind(id)
@@ -554,6 +615,7 @@ impl Database {
         .bind(display_name)
         .bind(model_id)
         .bind(api_interface.as_db_value())
+        .bind(DEFAULT_MAX_OUTPUT_TOKENS)
         .bind(sort_order)
         .execute(&self.pool)
         .await?;
@@ -1959,7 +2021,10 @@ mod tests {
             "gemini-2.5-pro",
             "gemini-2.5-flash",
         ] {
-            assert!(!model_ids.iter().any(|id| id == retired), "{retired} should be removed");
+            assert!(
+                !model_ids.iter().any(|id| id == retired),
+                "{retired} should be removed"
+            );
         }
         for latest in [
             "claude-opus-5-5",
@@ -1970,8 +2035,60 @@ mod tests {
             "gemini-3.1-pro-preview",
             "gemini-3.8-flash",
         ] {
-            assert!(model_ids.iter().any(|id| id == latest), "{latest} should exist");
+            assert!(
+                model_ids.iter().any(|id| id == latest),
+                "{latest} should exist"
+            );
         }
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn raises_legacy_max_output_tokens_only_once() {
+        let path = test_db_path();
+        let db = Database::new(&path).await.expect("db should initialize");
+
+        let max_tokens = |db: &Database| {
+            let pool = db.pool.clone();
+            async move {
+                sqlx::query_scalar::<_, i32>(
+                    "SELECT max_output_tokens FROM ai_model_profiles WHERE id = 'anthropic:claude-sonnet-5-5'",
+                )
+                .fetch_one(&pool)
+                .await
+                .expect("profile should exist")
+            }
+        };
+
+        // New databases seed the larger default and record the migration version.
+        assert_eq!(max_tokens(&db).await, 16384);
+
+        // A pre-migration database still holds the old default.
+        sqlx::query("UPDATE ai_model_profiles SET max_output_tokens = 4096")
+            .execute(&db.pool)
+            .await
+            .expect("should reset tokens");
+        sqlx::query("PRAGMA user_version = 0")
+            .execute(&db.pool)
+            .await
+            .expect("should reset version");
+        drop(db);
+
+        let db = Database::new(&path).await.expect("db should re-initialize");
+        assert_eq!(max_tokens(&db).await, 16384);
+
+        // A value the user picks afterwards must survive later launches.
+        sqlx::query("UPDATE ai_model_profiles SET max_output_tokens = 4096")
+            .execute(&db.pool)
+            .await
+            .expect("should set user value");
+        drop(db);
+
+        let db = Database::new(&path)
+            .await
+            .expect("db should re-initialize again");
+        assert_eq!(max_tokens(&db).await, 4096);
 
         let _ = std::fs::remove_file(path);
     }

@@ -1,6 +1,12 @@
+mod anthropic;
+#[cfg(test)]
+pub(crate) mod test_support;
+
 use futures_util::StreamExt;
 use genai::adapter::AdapterKind;
-use genai::chat::{ChatMessage, ChatOptions, ChatRequest, ChatStreamEvent};
+use genai::chat::{
+    ChatMessage, ChatOptions, ChatRequest, ChatStreamEvent, ReasoningEffort, StopReason,
+};
 use genai::resolver::{AuthData, Endpoint};
 use genai::{Client, ModelIden, ServiceTarget};
 use serde::{Deserialize, Serialize};
@@ -275,21 +281,29 @@ impl TryFrom<crate::database::AiModelProfileRow> for ModelProfile {
 
 pub struct AiRuntime {
     client: Client,
+    http: reqwest::Client,
 }
 
 impl Default for AiRuntime {
     fn default() -> Self {
+        let http = crate::utils::streaming::anthropic_http_client().clone();
         Self {
-            client: Client::builder()
-                .with_reqwest(crate::utils::streaming::anthropic_http_client().clone())
-                .build(),
+            client: Client::builder().with_reqwest(http.clone()).build(),
+            http,
         }
     }
 }
 
 impl AiRuntime {
     pub async fn complete(&self, resolved: AiResolvedRequest) -> Result<AiTextResponse, AiError> {
-        let options = chat_options(&resolved.request);
+        if let Some(tuning) = anthropic::latency_tuning(
+            resolved.provider_config.provider_kind,
+            &resolved.model_profile.model_id,
+        ) {
+            return anthropic::complete(&self.http, resolved, tuning).await;
+        }
+
+        let options = chat_options(&resolved);
         let target = service_target(&resolved)?;
         let chat_req = chat_request(&resolved.request);
         let response = self
@@ -297,6 +311,14 @@ impl AiRuntime {
             .exec_chat(target, chat_req, Some(&options))
             .await
             .map_err(map_genai_error)?;
+
+        if let Some(err) = response
+            .stop_reason
+            .as_ref()
+            .and_then(genai_stop_reason_error)
+        {
+            return Err(err);
+        }
 
         let input_tokens = response.usage.prompt_tokens;
         let output_tokens = response.usage.completion_tokens;
@@ -327,7 +349,14 @@ impl AiRuntime {
             ));
         }
 
-        let options = chat_options(&resolved.request)
+        if let Some(tuning) = anthropic::latency_tuning(
+            resolved.provider_config.provider_kind,
+            &resolved.model_profile.model_id,
+        ) {
+            return anthropic::stream(&self.http, resolved, tuning, on_event).await;
+        }
+
+        let options = chat_options(&resolved)
             .with_capture_content(true)
             .with_capture_usage(true);
         let target = service_target(&resolved)?;
@@ -342,6 +371,7 @@ impl AiRuntime {
         let mut full_text = String::new();
         let mut input_tokens = None;
         let mut output_tokens = None;
+        let mut stop_error = None;
 
         while let Some(event) = stream.next().await {
             match event.map_err(map_genai_error)? {
@@ -352,6 +382,10 @@ impl AiRuntime {
                     });
                 }
                 ChatStreamEvent::End(end) => {
+                    stop_error = end
+                        .captured_stop_reason
+                        .as_ref()
+                        .and_then(genai_stop_reason_error);
                     if let Some(usage) = &end.captured_usage {
                         input_tokens = usage.prompt_tokens;
                         output_tokens = usage.completion_tokens;
@@ -367,6 +401,10 @@ impl AiRuntime {
                 | ChatStreamEvent::ThoughtSignatureChunk(_)
                 | ChatStreamEvent::ToolCallChunk(_) => {}
             }
+        }
+
+        if let Some(err) = stop_error {
+            return Err(err);
         }
 
         if full_text.is_empty() {
@@ -424,13 +462,59 @@ fn chat_request(request: &AiTextRequest) -> ChatRequest {
     chat_req
 }
 
-fn chat_options(request: &AiTextRequest) -> ChatOptions {
+fn chat_options(resolved: &AiResolvedRequest) -> ChatOptions {
+    let request = &resolved.request;
     let mut options =
         ChatOptions::default().with_max_tokens(request.max_output_tokens.max(1) as u32);
     if let Some(temperature) = request.temperature {
         options = options.with_temperature(temperature as f64);
     }
+    if let Some(effort) = low_latency_reasoning_effort(
+        resolved.provider_config.provider_kind,
+        &resolved.model_profile.model_id,
+    ) {
+        options = options.with_reasoning_effort(effort);
+    }
     options
+}
+
+/// Short text tasks (translate/polish) do not benefit from deep reasoning, and the
+/// default reasoning depth delays the first streamed token. Only known reasoning
+/// model families are tuned so that non-reasoning models (which reject the
+/// parameter) keep working through custom endpoints.
+fn low_latency_reasoning_effort(
+    provider_kind: ProviderKind,
+    model_id: &str,
+) -> Option<ReasoningEffort> {
+    let supports_reasoning = match provider_kind {
+        ProviderKind::OpenAi => model_id.starts_with("gpt-5") || model_id.starts_with("gpt-6"),
+        ProviderKind::Google => model_id.contains("gemini-3") || model_id.contains("gemini-2.5"),
+        ProviderKind::Anthropic => false,
+    };
+    supports_reasoning.then_some(ReasoningEffort::Low)
+}
+
+/// Builds the user-facing error for responses that ended abnormally.
+pub(crate) fn stop_reason_error(reason: &str) -> Option<AiError> {
+    match reason {
+        "max_tokens" | "length" | "MAX_TOKENS" | "incomplete" => Some(AiError::new(
+            AiErrorCode::ProviderError,
+            "응답이 최대 출력 길이에서 잘렸습니다. 설정에서 모델의 최대 출력 토큰을 늘려 주세요.",
+        )),
+        "refusal" => Some(AiError::new(
+            AiErrorCode::ProviderError,
+            "모델이 이 요청의 처리를 거부했습니다.",
+        )),
+        _ => None,
+    }
+}
+
+fn genai_stop_reason_error(reason: &StopReason) -> Option<AiError> {
+    match reason {
+        StopReason::MaxTokens(_) => stop_reason_error("max_tokens"),
+        StopReason::Other(reason) => stop_reason_error(reason),
+        _ => None,
+    }
 }
 
 fn service_target(resolved: &AiResolvedRequest) -> Result<ServiceTarget, AiError> {
@@ -555,7 +639,60 @@ fn map_genai_error(err: genai::Error) -> AiError {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_provider_base_url, ProviderKind};
+    use super::test_support::{one_shot_server, resolved_request};
+    use super::{normalize_provider_base_url, AiRuntime, ProviderKind};
+
+    /// Sends a request to a fake endpoint that always fails and returns what it received.
+    async fn captured_request(provider_kind: ProviderKind, model_id: &str) -> String {
+        let response =
+            "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}"
+                .to_string();
+        let (base_url, server) = one_shot_server(response).await;
+        let resolved = resolved_request(provider_kind, model_id, &base_url);
+        let _ = AiRuntime::default().complete(resolved).await;
+        server.await.expect("server task should finish")
+    }
+
+    #[tokio::test]
+    async fn openai_reasoning_models_request_low_reasoning_effort() {
+        let received = captured_request(ProviderKind::OpenAi, "gpt-6.1-sol").await;
+        assert!(received.contains("\"effort\":\"low\""), "{received}");
+
+        let received = captured_request(ProviderKind::OpenAi, "gpt-6-luna").await;
+        assert!(received.contains("\"effort\":\"low\""), "{received}");
+    }
+
+    #[tokio::test]
+    async fn openai_non_reasoning_models_do_not_get_reasoning_effort() {
+        let received = captured_request(ProviderKind::OpenAi, "gpt-4.1").await;
+        assert!(!received.contains("\"effort\""), "{received}");
+    }
+
+    #[tokio::test]
+    async fn gemini_3_models_request_low_thinking_level() {
+        for model in ["gemini-3.8-flash", "gemini-3.1-pro-preview"] {
+            let received = captured_request(ProviderKind::Google, model).await;
+            assert!(
+                received.contains("\"thinkingLevel\":\"LOW\""),
+                "{model}: {received}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn claude_5_5_models_bypass_genai_and_use_direct_client() {
+        let received = captured_request(ProviderKind::Anthropic, "claude-sonnet-5-5").await;
+        assert!(received.contains("\"between_tools\""), "{received}");
+        assert!(received.contains("\"effort\":\"medium\""), "{received}");
+    }
+
+    #[tokio::test]
+    async fn other_claude_models_keep_using_genai_without_thinking_overrides() {
+        let received = captured_request(ProviderKind::Anthropic, "claude-haiku-4-5-20251001").await;
+        assert!(received.starts_with("POST /v1/messages "), "{received}");
+        assert!(!received.contains("between_tools"), "{received}");
+        assert!(!received.contains("\"thinking\""), "{received}");
+    }
 
     #[test]
     fn normalizes_provider_base_urls() {

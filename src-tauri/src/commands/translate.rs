@@ -8,7 +8,9 @@ use crate::AppState;
 use tauri::ipc::Channel;
 use tauri::State;
 
-use super::types::{TokenUsage, TranslateError, TranslateResponse, TranslateStreamEvent};
+use super::types::{
+    exceeds_max_text_length, TokenUsage, TranslateError, TranslateResponse, TranslateStreamEvent,
+};
 
 fn emit_translate_stream_event(
     on_event: &Channel<TranslateStreamEvent>,
@@ -109,97 +111,6 @@ async fn resolve_ai_request(
 }
 
 #[tauri::command]
-pub async fn get_cached_translation(
-    state: State<'_, AppState>,
-    text: String,
-    source_language: Option<String>,
-    target_language: Option<String>,
-    model: Option<String>,
-) -> Result<Option<TranslateResponse>, String> {
-    // Validation
-    if text.is_empty() {
-        return Ok(Some(TranslateResponse {
-            success: false,
-            translated_text: None,
-            detected_language: None,
-            from_cache: false,
-            glossary_applied: vec![],
-            token_usage: None,
-            error: Some(TranslateError {
-                code: "EMPTY_TEXT".to_string(),
-                message: "Text cannot be empty".to_string(),
-            }),
-        }));
-    }
-
-    if text.len() > 10000 {
-        return Ok(Some(TranslateResponse {
-            success: false,
-            translated_text: None,
-            detected_language: None,
-            from_cache: false,
-            glossary_applied: vec![],
-            token_usage: None,
-            error: Some(TranslateError {
-                code: "TEXT_TOO_LONG".to_string(),
-                message: "Text exceeds maximum length of 10000 characters".to_string(),
-            }),
-        }));
-    }
-
-    // If explicit model is provided, caller intends to bypass cache.
-    if model.is_some() {
-        return Ok(None);
-    }
-
-    let db = &state.db;
-    let settings = db.get_settings().await.map_err(|e| e.to_string())?;
-
-    // Detect or use provided language
-    let src_lang = source_language.unwrap_or_else(|| detect_language(&text));
-    let tgt_lang = target_language.unwrap_or_else(|| {
-        if src_lang == "ko" {
-            "en".to_string()
-        } else {
-            "ko".to_string()
-        }
-    });
-
-    let model_profile_id = effective_model_profile_id(&settings, None);
-    if let Ok(Some(cached)) = db
-        .find_cached_translation(
-            &text,
-            &src_lang,
-            &tgt_lang,
-            Some(&model_profile_id),
-            settings.translation_cache_days,
-        )
-        .await
-    {
-        return Ok(Some(TranslateResponse {
-            success: true,
-            translated_text: Some(cached.translated_text),
-            detected_language: Some(src_lang),
-            from_cache: true,
-            glossary_applied: cached
-                .glossary_used
-                .map(|g| serde_json::from_str(&g).unwrap_or_default())
-                .unwrap_or_default(),
-            token_usage: match (cached.input_tokens, cached.output_tokens) {
-                (Some(i), Some(o)) => Some(TokenUsage {
-                    input_tokens: i,
-                    output_tokens: o,
-                }),
-                _ => None,
-            },
-            error: None,
-        }));
-    }
-
-    Ok(None)
-}
-
-#[tauri::command]
 pub async fn translate(
     state: State<'_, AppState>,
     text: String,
@@ -223,7 +134,7 @@ pub async fn translate(
         });
     }
 
-    if text.len() > 10000 {
+    if exceeds_max_text_length(&text) {
         return Ok(TranslateResponse {
             success: false,
             translated_text: None,
@@ -429,7 +340,7 @@ pub async fn translate_stream(
         return Ok(());
     }
 
-    if text.len() > 10000 {
+    if exceeds_max_text_length(&text) {
         emit_translate_stream_event(
             &on_event,
             TranslateStreamEvent::Error {
@@ -592,6 +503,16 @@ pub async fn translate_stream(
         }
     };
 
+    // Tell the UI we are done before doing bookkeeping, so the result becomes
+    // actionable without waiting for the cache/glossary DB writes.
+    emit_translate_stream_event(
+        &on_event,
+        TranslateStreamEvent::Completed {
+            full_text: response.text.clone(),
+            token_usage: response_token_usage(response.input_tokens, response.output_tokens),
+        },
+    );
+
     let glossary_used = match serde_json::to_string(&glossary_ids) {
         Ok(value) => Some(value),
         Err(err) => {
@@ -629,14 +550,6 @@ pub async fn translate_stream(
             log::warn!("Failed to update glossary usage (streaming): {}", err);
         }
     }
-
-    emit_translate_stream_event(
-        &on_event,
-        TranslateStreamEvent::Completed {
-            full_text: response.text,
-            token_usage: response_token_usage(response.input_tokens, response.output_tokens),
-        },
-    );
 
     Ok(())
 }
