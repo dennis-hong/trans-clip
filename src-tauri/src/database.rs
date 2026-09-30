@@ -6,7 +6,31 @@ use crate::ai::{
 use sqlx::{sqlite::SqlitePoolOptions, Pool, Sqlite};
 use std::path::Path;
 
-const DEFAULT_PREFERRED_MODEL: &str = "claude-sonnet-5";
+const DEFAULT_PREFERRED_MODEL: &str = "claude-sonnet-5-5";
+
+/// Retired legacy `preferred_model` values and their latest replacements.
+const RETIRED_ANTHROPIC_MODELS: [(&str, &str); 5] = [
+    ("claude-opus-4-6", "claude-opus-5-5"),
+    ("claude-opus-4-7", "claude-opus-5-5"),
+    ("claude-opus-4-8", "claude-opus-5-5"),
+    ("claude-sonnet-4-6", DEFAULT_PREFERRED_MODEL),
+    ("claude-sonnet-5", DEFAULT_PREFERRED_MODEL),
+];
+
+/// Retired seeded model profiles as `((provider, model_id), (provider, model_id))`.
+type ModelRef = (&'static str, &'static str);
+const RETIRED_MODELS: [(ModelRef, ModelRef); 10] = [
+    (("anthropic", "claude-opus-4-6"), ("anthropic", "claude-opus-5-5")),
+    (("anthropic", "claude-opus-4-7"), ("anthropic", "claude-opus-5-5")),
+    (("anthropic", "claude-opus-4-8"), ("anthropic", "claude-opus-5-5")),
+    (("anthropic", "claude-sonnet-4-6"), ("anthropic", "claude-sonnet-5-5")),
+    (("anthropic", "claude-sonnet-5"), ("anthropic", "claude-sonnet-5-5")),
+    (("openai", "gpt-5.5"), ("openai", "gpt-6.1-sol")),
+    (("openai", "gpt-5.4-mini"), ("openai", "gpt-6-luna")),
+    (("google", "gemini-2.5-pro"), ("google", "gemini-3.1-pro-preview")),
+    (("google", "gemini-2.5-flash"), ("google", "gemini-3.8-flash")),
+    (("google", "gemini-2.0-flash"), ("google", "gemini-3.8-flash")),
+];
 
 pub struct Database {
     pub pool: Pool<Sqlite>,
@@ -139,7 +163,7 @@ impl Database {
             CREATE TABLE IF NOT EXISTS user_settings (
                 id TEXT PRIMARY KEY DEFAULT 'default',
                 max_history_count INTEGER NOT NULL DEFAULT 50,
-                preferred_model TEXT NOT NULL DEFAULT 'claude-sonnet-5',
+                preferred_model TEXT NOT NULL DEFAULT 'claude-sonnet-5-5',
                 auto_detect_language INTEGER NOT NULL DEFAULT 1,
                 double_press_interval INTEGER NOT NULL DEFAULT 500,
                 translation_cache_days INTEGER NOT NULL DEFAULT 7,
@@ -276,12 +300,8 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        // Migration: replace retired Anthropic defaults with current model IDs.
-        for (old_model, new_model) in [
-            ("claude-opus-4-6", "claude-opus-4-8"),
-            ("claude-opus-4-7", "claude-opus-4-8"),
-            ("claude-sonnet-4-6", DEFAULT_PREFERRED_MODEL),
-        ] {
+        // Migration: replace retired seeded models with the latest model in the same line.
+        for (old_model, new_model) in RETIRED_ANTHROPIC_MODELS {
             sqlx::query("UPDATE user_settings SET preferred_model = ? WHERE preferred_model = ?")
                 .bind(new_model)
                 .bind(old_model)
@@ -289,33 +309,24 @@ impl Database {
                 .await?;
         }
 
-        for (old_profile_id, new_profile_id) in [
-            ("anthropic:claude-opus-4-6", "anthropic:claude-opus-4-8"),
-            ("anthropic:claude-opus-4-7", "anthropic:claude-opus-4-8"),
-            ("anthropic:claude-sonnet-4-6", "anthropic:claude-sonnet-5"),
-        ] {
+        for (old_model, new_model) in RETIRED_MODELS {
+            let old_profile_id = format!("{}:{}", old_model.0, old_model.1);
+            let new_profile_id = format!("{}:{}", new_model.0, new_model.1);
+
             sqlx::query(
                 "UPDATE user_settings SET preferred_model_profile_id = ? WHERE preferred_model_profile_id = ?",
             )
-            .bind(new_profile_id)
-            .bind(old_profile_id)
+            .bind(&new_profile_id)
+            .bind(&old_profile_id)
             .execute(&self.pool)
             .await?;
-        }
 
-        sqlx::query(
-            r#"
-            DELETE FROM ai_model_profiles
-            WHERE provider_config_id = 'anthropic'
-              AND (
-                (id = 'anthropic:claude-opus-4-6' AND model_id = 'claude-opus-4-6')
-                OR (id = 'anthropic:claude-opus-4-7' AND model_id = 'claude-opus-4-7')
-                OR (id = 'anthropic:claude-sonnet-4-6' AND model_id = 'claude-sonnet-4-6')
-              )
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
+            sqlx::query("DELETE FROM ai_model_profiles WHERE id = ? AND model_id = ?")
+                .bind(&old_profile_id)
+                .bind(old_model.1)
+                .execute(&self.pool)
+                .await?;
+        }
 
         // Migration: add updated_at column to clipboard_items if it doesn't exist
         match sqlx::query("ALTER TABLE clipboard_items ADD COLUMN updated_at DATETIME")
@@ -414,15 +425,15 @@ impl Database {
 
         for (id, display_name, model_id, sort_order) in [
             (
-                "anthropic:claude-opus-4-8",
-                "Claude Opus 4.8",
-                "claude-opus-4-8",
+                "anthropic:claude-opus-5-5",
+                "Claude Opus 5.5",
+                "claude-opus-5-5",
                 10,
             ),
             (
-                "anthropic:claude-sonnet-5",
-                "Claude Sonnet 5",
-                "claude-sonnet-5",
+                "anthropic:claude-sonnet-5-5",
+                "Claude Sonnet 5.5",
+                "claude-sonnet-5-5",
                 20,
             ),
             (
@@ -444,8 +455,8 @@ impl Database {
         }
 
         for (id, display_name, model_id, sort_order) in [
-            ("openai:gpt-5.5", "GPT 5.5", "gpt-5.5", 100),
-            ("openai:gpt-5.4-mini", "GPT 5.4 Mini", "gpt-5.4-mini", 110),
+            ("openai:gpt-6.1-sol", "GPT-6.1 Sol", "gpt-6.1-sol", 100),
+            ("openai:gpt-6-luna", "GPT-6 Luna", "gpt-6-luna", 110),
         ] {
             self.ensure_model_profile(
                 id,
@@ -460,15 +471,15 @@ impl Database {
 
         for (id, display_name, model_id, sort_order) in [
             (
-                "google:gemini-2.5-pro",
-                "Gemini 2.5 Pro",
-                "gemini-2.5-pro",
+                "google:gemini-3.1-pro-preview",
+                "Gemini 3.1 Pro (Preview)",
+                "gemini-3.1-pro-preview",
                 200,
             ),
             (
-                "google:gemini-2.5-flash",
-                "Gemini 2.5 Flash",
-                "gemini-2.5-flash",
+                "google:gemini-3.8-flash",
+                "Gemini 3.8 Flash",
+                "gemini-3.8-flash",
                 210,
             ),
         ] {
@@ -1522,8 +1533,8 @@ pub struct AiModelProfileRow {
 
 fn default_anthropic_model_display_name(model_id: &str) -> String {
     match model_id {
-        "claude-opus-4-8" => "Claude Opus 4.8".to_string(),
-        "claude-sonnet-5" => "Claude Sonnet 5".to_string(),
+        "claude-opus-5-5" => "Claude Opus 5.5".to_string(),
+        "claude-sonnet-5-5" => "Claude Sonnet 5.5".to_string(),
         "claude-haiku-4-5-20251001" => "Claude Haiku 4.5".to_string(),
         _ => model_id.to_string(),
     }
@@ -1640,7 +1651,7 @@ mod tests {
 
         assert_eq!(
             settings.preferred_model_profile_id.as_deref(),
-            Some("anthropic:claude-sonnet-5")
+            Some("anthropic:claude-sonnet-5-5")
         );
         assert!(providers.iter().any(|provider| {
             provider.id == "anthropic"
@@ -1656,22 +1667,22 @@ mod tests {
                 && provider.base_url == "https://generativelanguage.googleapis.com/v1beta"
         }));
         assert!(models.iter().any(|model| {
-            model.id == "anthropic:claude-opus-4-8"
-                && model.display_name == "Claude Opus 4.8"
-                && model.model_id == "claude-opus-4-8"
+            model.id == "anthropic:claude-opus-5-5"
+                && model.display_name == "Claude Opus 5.5"
+                && model.model_id == "claude-opus-5-5"
         }));
         assert!(models.iter().any(|model| {
-            model.id == "anthropic:claude-sonnet-5"
-                && model.display_name == "Claude Sonnet 5"
-                && model.model_id == "claude-sonnet-5"
+            model.id == "anthropic:claude-sonnet-5-5"
+                && model.display_name == "Claude Sonnet 5.5"
+                && model.model_id == "claude-sonnet-5-5"
         }));
         assert!(models.iter().any(|model| {
-            model.id == "openai:gpt-5.5"
+            model.id == "openai:gpt-6.1-sol"
                 && model.provider_config_id == "openai"
                 && model.api_interface == "openai_responses"
         }));
         assert!(models.iter().any(|model| {
-            model.id == "google:gemini-2.5-flash"
+            model.id == "google:gemini-3.8-flash"
                 && model.provider_config_id == "google"
                 && model.api_interface == "gemini_generate_content"
         }));
@@ -1829,10 +1840,10 @@ mod tests {
         let db = Database::new(&path).await.expect("db should initialize");
         let settings = db.get_settings().await.expect("should fetch settings");
 
-        assert_eq!(settings.preferred_model, "claude-opus-4-8");
+        assert_eq!(settings.preferred_model, "claude-opus-5-5");
         assert_eq!(
             settings.preferred_model_profile_id.as_deref(),
-            Some("anthropic:claude-opus-4-8")
+            Some("anthropic:claude-opus-5-5")
         );
 
         let _ = std::fs::remove_file(path);
@@ -1889,8 +1900,78 @@ mod tests {
         assert_eq!(settings.preferred_model, DEFAULT_PREFERRED_MODEL);
         assert_eq!(
             settings.preferred_model_profile_id.as_deref(),
-            Some("anthropic:claude-sonnet-5")
+            Some("anthropic:claude-sonnet-5-5")
         );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn migrates_retired_profiles_for_all_providers_to_latest_models() {
+        let path = test_db_path();
+        let db = Database::new(&path).await.expect("db should initialize");
+
+        for (id, provider, model_id) in [
+            ("anthropic:claude-opus-4-8", "anthropic", "claude-opus-4-8"),
+            ("anthropic:claude-sonnet-5", "anthropic", "claude-sonnet-5"),
+            ("openai:gpt-5.5", "openai", "gpt-5.5"),
+            ("openai:gpt-5.4-mini", "openai", "gpt-5.4-mini"),
+            ("google:gemini-2.5-pro", "google", "gemini-2.5-pro"),
+            ("google:gemini-2.5-flash", "google", "gemini-2.5-flash"),
+        ] {
+            sqlx::query(
+                "INSERT INTO ai_model_profiles (id, provider_config_id, display_name, model_id, api_interface) VALUES (?, ?, 'legacy', ?, 'legacy')",
+            )
+            .bind(id)
+            .bind(provider)
+            .bind(model_id)
+            .execute(&db.pool)
+            .await
+            .expect("should insert retired profile");
+        }
+        sqlx::query(
+            "UPDATE user_settings SET preferred_model_profile_id = 'openai:gpt-5.4-mini' WHERE id = 'default'",
+        )
+        .execute(&db.pool)
+        .await
+        .expect("should select retired profile");
+        drop(db);
+
+        let db = Database::new(&path).await.expect("db should re-initialize");
+        let settings = db.get_settings().await.expect("should fetch settings");
+        let model_ids: Vec<String> = db
+            .get_ai_model_profiles()
+            .await
+            .expect("should fetch profiles")
+            .into_iter()
+            .map(|model| model.model_id)
+            .collect();
+
+        assert_eq!(
+            settings.preferred_model_profile_id.as_deref(),
+            Some("openai:gpt-6-luna")
+        );
+        for retired in [
+            "claude-opus-4-8",
+            "claude-sonnet-5",
+            "gpt-5.5",
+            "gpt-5.4-mini",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+        ] {
+            assert!(!model_ids.iter().any(|id| id == retired), "{retired} should be removed");
+        }
+        for latest in [
+            "claude-opus-5-5",
+            "claude-sonnet-5-5",
+            "claude-haiku-4-5-20251001",
+            "gpt-6.1-sol",
+            "gpt-6-luna",
+            "gemini-3.1-pro-preview",
+            "gemini-3.8-flash",
+        ] {
+            assert!(model_ids.iter().any(|id| id == latest), "{latest} should exist");
+        }
 
         let _ = std::fs::remove_file(path);
     }

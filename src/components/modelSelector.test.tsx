@@ -71,20 +71,20 @@ function makeSettings(preferredModelProfileId: string): UserSettings {
     ],
     aiModelProfiles: [
       {
-        id: "anthropic:claude-opus-4-8",
+        id: "anthropic:claude-opus-5-5",
         providerConfigId: "anthropic",
-        displayName: "Claude Opus 4.8",
-        modelId: "claude-opus-4-8",
+        displayName: "Claude Opus 5.5",
+        modelId: "claude-opus-5-5",
         apiInterface: "anthropic_messages",
         supportsStreaming: true,
         maxOutputTokens: 4096,
         sortOrder: 10,
       },
       {
-        id: "anthropic:claude-sonnet-5",
+        id: "anthropic:claude-sonnet-5-5",
         providerConfigId: "anthropic",
-        displayName: "Claude Sonnet 5",
-        modelId: "claude-sonnet-5",
+        displayName: "Claude Sonnet 5.5",
+        modelId: "claude-sonnet-5-5",
         apiInterface: "anthropic_messages",
         supportsStreaming: true,
         maxOutputTokens: 4096,
@@ -135,9 +135,9 @@ describe("popup model selectors", () => {
     fireEvent.click(screen.getByRole("button", { name: "다시 번역" }));
     expect(mocks.translate).toHaveBeenLastCalledWith("hello", undefined);
 
-    fireEvent.change(modelSelect, { target: { value: "anthropic:claude-opus-4-8" } });
+    fireEvent.change(modelSelect, { target: { value: "anthropic:claude-opus-5-5" } });
     fireEvent.click(screen.getByRole("button", { name: "다시 번역" }));
-    expect(mocks.translate).toHaveBeenLastCalledWith("hello", "anthropic:claude-opus-4-8");
+    expect(mocks.translate).toHaveBeenLastCalledWith("hello", "anthropic:claude-opus-5-5");
   });
 
   it("shows the configured polish default as a real model option", () => {
