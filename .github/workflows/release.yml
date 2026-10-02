@@ -11,6 +11,8 @@ on:
 jobs:
   release-macos-aarch64:
     runs-on: macos-latest
+    # A normal run takes 8-10 minutes; without a limit a stuck step holds the runner for 6 hours.
+    timeout-minutes: 45
     permissions:
       contents: write
     env:
@@ -192,13 +194,16 @@ jobs:
             ${{ steps.prep.outputs.latest_json }}
             ${{ steps.prep.outputs.manual_zip }}
 
+      # Best-effort only: the runner is an ephemeral VM, so the keychain and the trust setting are
+      # discarded with it. `sudo security remove-trusted-cert -d` used to live here and hung the job
+      # for hours (admin-domain trust changes can wait on an interactive authorization), so it is
+      # gone, and this step is bounded so that a hang here can never stall or fail a release.
       - name: Remove signing identity
         if: always()
+        timeout-minutes: 2
+        continue-on-error: true
         shell: bash
         run: |
           if [ -n "${CODESIGN_KEYCHAIN_PATH:-}" ]; then
             security delete-keychain "${CODESIGN_KEYCHAIN_PATH}" || true
-          fi
-          if [ -f "${RUNNER_TEMP}/transclip-signing.pem" ]; then
-            sudo security remove-trusted-cert -d "${RUNNER_TEMP}/transclip-signing.pem" || true
           fi
