@@ -1,5 +1,6 @@
 use crate::utils::monitor::{
     calculate_adaptive_width, generate_monitor_key, get_logical_bounds, sort_monitors_by_position,
+    WINDOW_BOTTOM_MARGIN,
 };
 use crate::AppState;
 use std::sync::{
@@ -465,7 +466,7 @@ pub async fn move_to_monitor(
     let (x, y) = match anchor.as_str() {
         "bottom" => {
             let x = bounds.x + (bounds.width - target_width) / 2;
-            let y = bounds.y + bounds.height - win_logical_height;
+            let y = bounds.y + bounds.height - win_logical_height - WINDOW_BOTTOM_MARGIN;
             (x, y)
         }
         "top" => {
@@ -480,7 +481,7 @@ pub async fn move_to_monitor(
         }
         _ => {
             let x = bounds.x + (bounds.width - target_width) / 2;
-            let y = bounds.y + bounds.height - win_logical_height;
+            let y = bounds.y + bounds.height - win_logical_height - WINDOW_BOTTOM_MARGIN;
             (x, y)
         }
     };
@@ -700,7 +701,7 @@ pub async fn snap_to_bottom(app: tauri::AppHandle) -> Result<(), String> {
     let win_logical_height = (win_size.height as f64 / scale) as i32;
 
     // Keep x position, snap y to bottom (using logical coordinates)
-    let new_y = bounds.y + bounds.height - win_logical_height;
+    let new_y = bounds.y + bounds.height - win_logical_height - WINDOW_BOTTOM_MARGIN;
 
     window
         .set_position(tauri::Position::Logical(tauri::LogicalPosition {
@@ -983,7 +984,7 @@ pub async fn set_drawer_mode(
         // Center horizontally on the monitor
         bounds.x + (bounds.width - saved_width) / 2
     };
-    let new_y = bounds.y + bounds.height - new_logical_height;
+    let new_y = bounds.y + bounds.height - new_logical_height - WINDOW_BOTTOM_MARGIN;
 
     window
         .set_position(tauri::Position::Logical(tauri::LogicalPosition {

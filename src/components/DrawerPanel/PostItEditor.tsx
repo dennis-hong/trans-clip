@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, useRef } from "react";
+import { Button, Kbd } from "@/components/common";
 
 interface PostItEditorProps {
   mode: "create" | "edit";
@@ -57,91 +58,43 @@ export function PostItEditor({
   const title = mode === "create" ? "새 메모" : "메모 편집";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="w-full max-w-lg mx-4 bg-white rounded-xl shadow-2xl overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50">
-          <div className="flex items-center gap-2">
-            <svg
-              className="w-5 h-5 text-amber-500"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-              />
-            </svg>
-            <span className="font-medium text-gray-800">{title}</span>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-gray-200 transition-colors"
-            title="닫기 (ESC)"
-          >
-            <svg
-              className="w-4 h-4 text-gray-500"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
-          </button>
-        </div>
+    <div className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/25 backdrop-blur-[3px]" onClick={onClose} />
 
-        {/* Content */}
-        <div className="p-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="sheet animate-pop-in relative w-full max-w-lg overflow-hidden"
+      >
+        <h2 className="px-5 pt-4 text-title text-label">{title}</h2>
+
+        <div className="px-5 pb-1 pt-3">
           <textarea
             ref={textareaRef}
             value={content}
             onChange={(e) => setContent(e.target.value)}
             placeholder="메모 내용을 입력하세요..."
-            className="w-full h-48 p-4 bg-yellow-50 border-2 border-yellow-200 rounded-lg resize-none text-sm text-gray-800 leading-relaxed focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400 placeholder:text-gray-400"
+            aria-label={title}
+            className="paper h-48 w-full resize-none px-4 py-3 text-reading text-label outline-none [overflow-wrap:anywhere] placeholder:text-label-3"
           />
 
-          {/* Character/Word count */}
-          <div className="flex items-center justify-between mt-2 text-xs text-gray-500">
-            <span>
-              {characterCount}자 · {wordCount}단어
-            </span>
-            <div className="flex items-center gap-2">
-              <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">
-                ESC
-              </span>
-              <span>취소</span>
-              <span className="mx-1">·</span>
-              <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">
-                ⌘↵
-              </span>
-              <span>저장</span>
-            </div>
-          </div>
+          <p className="mt-2 text-caption tabular-nums text-label-3">
+            {characterCount}자 · {wordCount}단어
+          </p>
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-200 bg-gray-50">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            취소
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={!content.trim()}
-            className="px-4 py-2 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
+        <div className="flex items-center justify-end gap-2 px-5 pb-4 pt-2">
+          <Kbd className="mr-1" aria-hidden="true">
+            ESC
+          </Kbd>
+          <Button onClick={onClose}>취소</Button>
+          <Button variant="primary" onClick={handleSave} disabled={!content.trim()}>
             저장
-          </button>
+            <span className="text-micro font-medium opacity-70" aria-hidden="true">
+              ⌘↵
+            </span>
+          </Button>
         </div>
       </div>
     </div>

@@ -1,5 +1,10 @@
 use tauri::Monitor;
 
+/// Logical gap kept between the bottom-anchored window and the bottom edge of
+/// its monitor. The window is a floating glass panel with rounded corners
+/// (native vibrancy), so it must not touch the screen edge.
+pub const WINDOW_BOTTOM_MARGIN: i32 = 12;
+
 /// Sort monitors by position (left to right, top to bottom)
 pub fn sort_monitors_by_position<'a>(
     monitors: impl Iterator<Item = &'a Monitor>,
