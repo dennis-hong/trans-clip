@@ -10,6 +10,7 @@ import {
   POLISH_CHANNELS,
   POLISH_OPTIONS,
 } from "@/store";
+import { Badge, Button, Icon, IconButton, Kbd, Select, Spinner } from "@/components/common";
 import type { ModelProfileId, PolishContext, PolishChannel, PolishOption } from "@/types";
 import { DEFAULT_MODEL_PROFILE_ID, formatModelProfileOption } from "@/types";
 
@@ -272,99 +273,61 @@ export function PolishPopup({
   ]);
 
   return (
-    <div ref={containerRef} className="flex flex-col h-full w-full">
-      {/* Header - Draggable area */}
-      <div
-        className="flex items-center gap-3 px-4 py-2 cursor-move select-none border-b border-gray-200/50"
-        onMouseDown={handleDragStart}
-      >
-        {/* Back button */}
-        <button
-          onClick={onClose}
-          className="p-1 rounded-lg hover:bg-gray-200/80 transition-colors"
-          title="뒤로"
-        >
-          <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-        </button>
+    <div ref={containerRef} className="tone-purple animate-fade-in flex h-full w-full flex-col">
+      <div className="grabber" aria-hidden="true" />
 
-        {/* Title */}
+      {/* Toolbar - draggable area */}
+      <header className="toolbar" onMouseDown={handleDragStart}>
+        <IconButton icon="chevron-left" label="뒤로" variant="glass" iconSize={18} onClick={onClose} />
+
         <div className="flex items-center gap-2">
-          <svg className="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-            />
-          </svg>
-          <span className="font-medium text-gray-800">글 다듬기</span>
+          <Icon name="sparkles" size={17} className="text-purple" />
+          <h1 className="text-title text-label">글 다듬기</h1>
         </div>
 
-        {/* Spacer */}
-        <div className="flex-1" />
-
-        {/* Keyboard hint */}
-        <div className="hidden sm:flex items-center gap-1 text-[10px] text-gray-400">
-          <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">ESC</span>
+        <div className="ml-auto flex items-center gap-2">
+          <Kbd className="hidden sm:inline-flex" aria-hidden="true">
+            ESC
+          </Kbd>
+          <IconButton icon="xmark" label="닫기 (ESC)" variant="glass" onClick={onClose} />
         </div>
+      </header>
 
-        {/* Close button */}
-        <button
-          onClick={onClose}
-          className="p-1.5 rounded-lg hover:bg-gray-200/80 transition-colors"
-          title="닫기 (ESC)"
-        >
-          <svg
-            className="w-4 h-4 text-gray-500"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-
-      {/* Content - 상단: 원문/결과 좌우, 하단: 설정 */}
-      <div className="flex-1 overflow-hidden p-4 flex flex-col gap-3">
-        {/* Top: Source & Result 좌우 배치 */}
-        <div className="flex-1 flex gap-4 min-h-0">
-          {/* Source Text - 노란색 포스트잇 (수정 가능) */}
-          <div className="flex-1 flex flex-col min-w-0">
-            <div className="flex items-center gap-2 mb-2 px-1">
-              <span className="text-xs font-medium text-amber-700">📝 원문 (러프한 초안)</span>
-              {isSourceModified && (
-                <span className="text-[10px] text-orange-600 bg-orange-100 px-1.5 py-0.5 rounded">
-                  수정됨
-                </span>
-              )}
+      {/* Draft → polished, with the tuning controls underneath */}
+      <div className="flex min-h-0 flex-1 flex-col gap-3 px-4 pb-3 pt-3">
+        <div className="flex min-h-0 flex-1 gap-3">
+          {/* Source text (editable) */}
+          <section className="flex min-w-0 flex-1 flex-col" aria-label="원문">
+            <div className="mb-2 flex items-center gap-2 px-1">
+              <h2 className="text-sub font-semibold text-label-2">원문 (러프한 초안)</h2>
+              {isSourceModified && <Badge tone="orange">수정됨</Badge>}
             </div>
-            <textarea
-              ref={sourceTextareaRef}
-              value={editableText}
-              onChange={(e) => setEditableText(e.target.value)}
-              className="flex-1 p-3 bg-yellow-100 border-2 border-yellow-300 rounded-lg shadow-md resize-none text-sm text-gray-800 leading-relaxed focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400"
-              placeholder="원문을 수정하여 다시 다듬을 수 있습니다..."
-            />
+            <div className="pane flex min-h-0 flex-1">
+              <textarea
+                ref={sourceTextareaRef}
+                value={editableText}
+                onChange={(e) => setEditableText(e.target.value)}
+                className="h-full w-full resize-none rounded-pane bg-transparent px-4 py-3 text-reading text-label outline-none [overflow-wrap:anywhere] placeholder:text-label-3"
+                placeholder="원문을 수정하여 다시 다듬을 수 있습니다..."
+              />
+            </div>
+          </section>
+
+          {/* Direction */}
+          <div className="flex items-center justify-center" aria-hidden="true">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-fill text-label-3">
+              <Icon name="arrow-right" size={14} strokeWidth={2} />
+            </span>
           </div>
 
-          {/* Arrow */}
-          <div className="flex items-center justify-center px-2 text-gray-400">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-            </svg>
-          </div>
-
-          {/* Result - 녹색 포스트잇 */}
-          <div className="flex-1 flex flex-col min-w-0">
-            <div className="flex items-center gap-2 mb-2 px-1">
-              <span className="text-xs font-medium text-green-700">✨ 정돈된 결과</span>
+          {/* Result */}
+          <section className="flex min-w-0 flex-1 flex-col" aria-label="정돈된 결과 영역">
+            <div className="mb-2 flex items-center gap-2 px-1">
+              <h2 className="text-sub font-semibold text-label-2">정돈된 결과</h2>
             </div>
             <div
               ref={resultContainerRef}
-              className="flex-1 p-3 bg-green-100 border-2 border-green-300 rounded-lg shadow-md overflow-y-auto"
+              className={`pane pane-result ${error ? "tone-red" : ""} min-h-0 flex-1 overflow-y-auto px-4 py-3`}
               role="status"
               aria-live="polite"
               aria-atomic="true"
@@ -372,119 +335,96 @@ export function PolishPopup({
             >
               <span className="sr-only">{resultStatusMessage}</span>
               {error ? (
-                <div>
-                  <p className="text-sm text-red-700">
-                    글 다듬기에 문제가 생겼습니다. 다시 시도해 주세요.
-                  </p>
-                  <p className="mt-1 text-xs text-red-600 break-words">{error}</p>
+                <div className="flex items-start gap-2.5">
+                  <Icon name="warning" size={16} className="mt-0.5 shrink-0 text-red" />
+                  <div className="min-w-0">
+                    <p className="text-body font-medium text-red-fg">
+                      글 다듬기에 문제가 생겼습니다. 다시 시도해 주세요.
+                    </p>
+                    <p className="selectable mt-1 break-words text-sub text-label-2">{error}</p>
+                  </div>
                 </div>
               ) : (fullText || streamedText) ? (
-                <p className="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">
+                <p className="selectable reading text-reading text-label">
                   {fullText || streamedText}
                   {isStreaming && (
-                    <span className="inline-block w-0.5 h-4 ml-0.5 bg-green-600 animate-pulse" />
+                    <span className="animate-caret ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-[3px] rounded-full bg-purple" />
                   )}
                 </p>
               ) : (
-                <div className="flex items-center justify-center h-full">
-                  <div className="flex items-center gap-2 text-sm text-green-600">
-                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      />
-                    </svg>
-                    <span>다듬는 중...</span>
-                  </div>
+                <div className="flex h-full min-h-[3rem] items-center justify-center gap-2 text-body text-label-3">
+                  <Spinner size={16} />
+                  <span>다듬는 중…</span>
                 </div>
               )}
             </div>
-          </div>
+          </section>
         </div>
 
-        {/* Bottom: Settings - 가로로 길게 */}
-        <div className="flex-shrink-0 p-3 bg-gray-100 border-2 border-gray-300 rounded-lg shadow-md">
-          <div className="flex items-center gap-4">
-            {/* Settings label */}
-            <span className="text-xs font-medium text-gray-600 flex-shrink-0">⚙️ 설정</span>
-
-            {/* Context Select */}
-            <div className="flex items-center gap-1.5">
-              <label className="text-[10px] text-gray-500">상황</label>
-              <select
+        {/* Tuning controls: what it is for (row 1), how it should read (row 2) */}
+        <div className="control-bar shrink-0 space-y-2.5 px-3.5 py-3">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <div className="flex items-center gap-2">
+              <label htmlFor="polish-context" className="text-sub text-label-3">
+                상황
+              </label>
+              <Select
+                id="polish-context"
                 value={lastContext}
                 onChange={(e) => handleContextChange(e.target.value as PolishContext)}
-                className="px-2 py-1 text-xs bg-white border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
               >
                 {POLISH_CONTEXTS.map((ctx) => (
                   <option key={ctx.id} value={ctx.id}>
                     {ctx.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
 
-            {/* Channel Select */}
-            <div className="flex items-center gap-1.5">
-              <label className="text-[10px] text-gray-500">채널</label>
-              <select
+            <div className="flex items-center gap-2">
+              <label htmlFor="polish-channel" className="text-sub text-label-3">
+                채널
+              </label>
+              <Select
+                id="polish-channel"
                 value={lastChannel}
                 onChange={(e) => handleChannelChange(e.target.value as PolishChannel)}
-                className="px-2 py-1 text-xs bg-white border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
               >
                 {POLISH_CHANNELS.map((ch) => (
                   <option key={ch.id} value={ch.id}>
                     {ch.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
 
-            {/* Model Select + Repolish button */}
-            <div className="flex items-center gap-1.5">
-              <label className="text-[10px] text-gray-500">모델</label>
-              <select
+            <div className="flex items-center gap-2">
+              <label htmlFor="polish-model" className="text-sub text-label-3">
+                모델
+              </label>
+              <Select
+                id="polish-model"
                 value={displayModel}
                 onChange={(e) => handleModelChange(e.target.value as ModelProfileId)}
-                className="px-2 py-1 text-xs bg-white border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
               >
                 {modelProfiles.map((model) => (
                   <option key={model.id} value={model.id}>
                     {formatModelProfileOption(model, providerConfigs, defaultModel)}
                   </option>
                 ))}
-              </select>
-              <button
-                onClick={handleRepolish}
-                disabled={isStreaming || !editableText.trim()}
-                className="px-3 py-1 text-xs font-medium text-purple-700 bg-purple-50 border border-purple-300 rounded-md hover:bg-purple-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                다시 다듬기
-              </button>
+              </Select>
             </div>
+          </div>
 
-            {/* Divider */}
-            <div className="w-px h-5 bg-gray-300" />
-
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
             {/* Options */}
-            <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="다듬기 옵션">
               {POLISH_OPTIONS.map((opt) => (
                 <label
                   key={opt.id}
-                  className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded-full cursor-pointer transition-colors ${
-                    lastOptions.includes(opt.id)
-                      ? "bg-purple-100 text-purple-700 border border-purple-300"
-                      : "bg-white text-gray-600 border border-gray-300 hover:bg-gray-50"
-                  }`}
+                  className="chip"
+                  data-on={lastOptions.includes(opt.id)}
+                  title={opt.description}
                 >
                   <input
                     type="checkbox"
@@ -496,51 +436,48 @@ export function PolishPopup({
                 </label>
               ))}
             </div>
+
+            <Button
+              variant="tinted"
+              onClick={handleRepolish}
+              disabled={isStreaming || !editableText.trim()}
+            >
+              다시 다듬기
+            </Button>
           </div>
         </div>
       </div>
 
-      {/* Footer - 액션 버튼 */}
-      <div className="flex flex-wrap items-center justify-end gap-2 px-4 py-3 border-t border-gray-200/50">
-        <div className="hidden sm:flex items-center gap-1 text-[10px] text-gray-400 mr-auto">
-          <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">ESC</span>
-          <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">⌘↵</span>
-        </div>
-        <button
-          onClick={handleTranslate}
-          disabled={isStreaming || !hasResult}
-          className="px-4 py-2 text-sm font-medium text-blue-700 bg-white border border-blue-300 rounded-lg hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
+      {/* Actions */}
+      <footer className="footbar flex shrink-0 flex-wrap items-center justify-end gap-2 px-4 py-3">
+        <Button variant="tinted" tone="accent" onClick={handleTranslate} disabled={isStreaming || !hasResult}>
           번역
-        </button>
-        <button
+        </Button>
+        <Button
+          variant={isSaved ? "tinted" : "secondary"}
+          tone={isSaved ? "green" : "accent"}
+          icon={isSaved ? "check" : undefined}
           onClick={handleSaveAsPostIt}
           disabled={isStreaming || !hasResult || isSaved}
-          className={`px-4 py-2 text-sm font-medium border rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-            isSaved
-              ? "text-green-700 bg-green-50 border-green-300"
-              : "text-amber-700 bg-white border-amber-300 hover:bg-amber-50"
-          }`}
         >
           {isSaved ? "저장됨!" : "메모로 저장"}
-        </button>
-        <button
-          onClick={handleCopy}
-          disabled={isStreaming || !hasResult}
-          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
+        </Button>
+        <Button onClick={handleCopy} disabled={isStreaming || !hasResult}>
           복사
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="primary"
+          tone="purple"
           onClick={handleReplace}
           disabled={isStreaming || !hasResult}
-          className="px-4 py-2 text-sm font-medium text-white bg-purple-500 rounded-lg hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           title="바꾸기 (⌘+Enter)"
         >
           바꾸기
-          <span className="ml-1.5 text-[10px] opacity-70">⌘↵</span>
-        </button>
-      </div>
+          <span className="text-micro font-medium opacity-70" aria-hidden="true">
+            ⌘↵
+          </span>
+        </Button>
+      </footer>
     </div>
   );
 }

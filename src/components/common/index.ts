@@ -1,3 +1,12 @@
-export { Button } from "./Button";
+export { Badge } from "./Badge";
+export { Button, TONE_CLASS, type Tone } from "./Button";
+export { Icon, type IconName } from "./Icon";
+export { IconButton } from "./IconButton";
+export { Kbd } from "./Kbd";
 export { Modal } from "./Modal";
+export { Segmented } from "./Segmented";
+export { Select } from "./Select";
+export { Slider } from "./Slider";
+export { Spinner } from "./Spinner";
+export { Switch } from "./Switch";
 export { Toast } from "./Toast";

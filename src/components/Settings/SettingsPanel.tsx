@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { useSettingsStore, useUpdateStore } from "@/store";
 import { ApiKeyInput } from "./ApiKeyInput";
+import { Badge, Button, Icon, Segmented, Select, Slider, Spinner, Switch } from "@/components/common";
 import {
   CUSTOM_ENDPOINT_API_KEY_ACCOUNT,
   DEFAULT_MODEL_PROFILE_ID,
@@ -275,8 +276,8 @@ export function SettingsPanel() {
 
   if (!settings) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="animate-spin w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full" />
+      <div className="flex h-full items-center justify-center text-label-3">
+        <Spinner size={20} />
       </div>
     );
   }
@@ -296,538 +297,502 @@ export function SettingsPanel() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-4">
-      {/* 2열 그리드 레이아웃 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <section className="md:col-span-2 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-900">AI 설정</h2>
-              <p className="mt-0.5 text-xs text-slate-500">
-                기본 모델만 고르면 바로 사용할 수 있습니다.
-              </p>
-            </div>
+    <div className="scroll-fade-y h-full overflow-y-auto px-5 pb-6 pt-4">
+      <div className="mx-auto grid max-w-[1120px] grid-cols-1 items-start gap-x-6 gap-y-5 md:grid-cols-2">
+        {/* Column 1 — AI */}
+        <div className="space-y-5">
+          <SettingsSection title="AI 모델">
+            <SettingsRow title="기본 모델" description="번역과 글 다듬기에 사용합니다.">
+              <Select
+                aria-label="기본 모델"
+                block
+                wrapperClassName="w-[270px]"
+                value={preferredModelId}
+                onChange={(e) => handleModelChange(e.target.value)}
+                disabled={isLoading}
+              >
+                {settings.aiModelProfiles.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {formatModelProfileOption(
+                      model,
+                      settings.aiProviderConfigs,
+                      preferredModelId
+                    )}
+                  </option>
+                ))}
+              </Select>
+            </SettingsRow>
+
+            <SettingsRow title="Provider">
+              <span className="text-body text-label-2">
+                {preferredProvider ? providerLabel(preferredProvider.providerKind) : "선택 필요"}
+              </span>
+            </SettingsRow>
+
+            <SettingsRow title="연결">
+              <Badge tone={preferredProvider?.endpointMode === "custom" ? "accent" : undefined}>
+                {preferredConnectionLabel}
+              </Badge>
+            </SettingsRow>
+
             <button
               type="button"
               onClick={() => setIsAiAdvancedOpen((open) => !open)}
-              className="rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+              aria-expanded={isAiAdvancedOpen}
+              className="form-row w-full text-left transition-colors hover:bg-fill"
             >
-              {isAiAdvancedOpen ? "고급 설정 닫기" : "고급 설정"}
+              <div className="min-w-0 flex-1">
+                <div className="text-body text-label">고급 설정</div>
+                <p className="mt-0.5 text-caption text-label-3">
+                  Provider 연결, API 키, 모델 목록을 직접 관리합니다.
+                </p>
+              </div>
+              <Icon
+                name="chevron-down"
+                size={15}
+                strokeWidth={2}
+                className={`shrink-0 text-label-3 transition-transform duration-200 ${
+                  isAiAdvancedOpen ? "rotate-180" : ""
+                }`}
+              />
             </button>
-          </div>
+          </SettingsSection>
 
-          <div className="grid grid-cols-1 gap-0 md:grid-cols-[minmax(320px,1fr)_minmax(360px,1fr)]">
-            <div className="space-y-3 border-b border-slate-200 px-4 py-4 md:border-b-0 md:border-r">
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium text-slate-600">
-                  기본 모델
-                </label>
-                <select
-                  value={preferredModelId}
-                  onChange={(e) => handleModelChange(e.target.value)}
-                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                  disabled={isLoading}
-                >
-                  {settings.aiModelProfiles.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {formatModelProfileOption(
-                        model,
-                        settings.aiProviderConfigs,
-                        preferredModelId
-                      )}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="rounded-md bg-slate-50 px-3 py-2">
-                  <div className="text-slate-500">Provider</div>
-                  <div className="mt-1 truncate font-medium text-slate-900">
-                    {preferredProvider
-                      ? providerLabel(preferredProvider.providerKind)
-                      : "선택 필요"}
-                  </div>
-                </div>
-                <div className="rounded-md bg-slate-50 px-3 py-2">
-                  <div className="text-slate-500">연결</div>
-                  <div className="mt-1 font-medium text-slate-900">
-                    {preferredConnectionLabel}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="px-4 py-4">
-              <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-xs font-semibold text-slate-700">Provider 상태</h3>
+          <SettingsSection
+            title="Provider 상태"
+            footer={
+              <>
                 {activeGatewayProviders.length > 0 && (
-                  <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
-                    Gateway {activeGatewayProviders.length}
+                  <span className={customKeyReady ? "" : "text-orange-fg"}>
+                    {customKeyReady
+                      ? "Gateway 공통 API 키가 설정되어 있습니다."
+                      : "Gateway 사용 시 공통 API 키를 저장해야 합니다."}
                   </span>
                 )}
-              </div>
-              <div className="divide-y divide-slate-100 rounded-md border border-slate-200">
-                {settings.aiProviderConfigs.map((provider) => {
-                  const account = providerKeyAccount(provider);
-                  const hasKey = aiApiKeyStatus[account]?.exists ?? false;
-                  return (
-                    <div key={provider.id} className="flex items-center gap-3 px-3 py-2 text-xs">
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate font-medium text-slate-800">
-                          {providerLabel(provider.providerKind)}
-                        </div>
-                        <div className="truncate text-[11px] text-slate-500">
-                          {provider.endpointMode === "custom" ? provider.baseUrl : "Public endpoint"}
-                        </div>
-                      </div>
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                        provider.endpointMode === "custom"
-                          ? "bg-blue-50 text-blue-700"
-                          : "bg-slate-100 text-slate-600"
-                      }`}>
-                        {provider.endpointMode === "custom" ? "Gateway" : "Public"}
-                      </span>
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                        hasKey ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
-                      }`}>
-                        {hasKey ? "Key 저장됨" : "Key 필요"}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-              {activeGatewayProviders.length > 0 && (
-                <p className={`mt-2 text-[11px] ${
-                  customKeyReady ? "text-slate-500" : "text-amber-700"
-                }`}>
-                  {customKeyReady
-                    ? "Gateway 공통 API 키가 설정되어 있습니다."
-                    : "Gateway 사용 시 공통 API 키를 저장해야 합니다."}
-                </p>
+                {error && <span className="block text-red-fg">{error}</span>}
+              </>
+            }
+          >
+            {settings.aiProviderConfigs.map((provider) => {
+              const account = providerKeyAccount(provider);
+              const hasKey = aiApiKeyStatus[account]?.exists ?? false;
+              return (
+                <SettingsRow
+                  key={provider.id}
+                  title={providerLabel(provider.providerKind)}
+                  description={provider.endpointMode === "custom" ? provider.baseUrl : "Public endpoint"}
+                >
+                  <Badge tone={provider.endpointMode === "custom" ? "accent" : undefined}>
+                    {provider.endpointMode === "custom" ? "Gateway" : "Public"}
+                  </Badge>
+                  <Badge tone={hasKey ? "green" : "orange"} icon={hasKey ? "check" : undefined}>
+                    {hasKey ? "Key 저장됨" : "Key 필요"}
+                  </Badge>
+                </SettingsRow>
+              );
+            })}
+          </SettingsSection>
+        </div>
+
+        {/* Column 2 — Usage */}
+        <div className="space-y-5">
+          <SettingsSection title="사용 환경">
+            <SliderRow
+              title="단축키 감지"
+              valueLabel={`${settings.doublePressInterval}ms`}
+              description="더블 프레스 입력으로 번역을 시작하는 시간 간격입니다."
+              min={200}
+              max={1000}
+              step={50}
+              value={settings.doublePressInterval}
+              onChange={handleDoublePressIntervalChange}
+              disabled={isLoading}
+            />
+            <SliderRow
+              title="클립보드 저장"
+              valueLabel={`${settings.maxHistoryCount}개`}
+              description="최근 복사 기록을 보관할 최대 개수입니다."
+              min={10}
+              max={200}
+              step={10}
+              value={settings.maxHistoryCount}
+              onChange={handleMaxHistoryChange}
+              disabled={isLoading}
+            />
+            <SliderRow
+              title="붙여넣기 딜레이"
+              valueLabel={`${settings.pasteDelayMs}ms`}
+              description="붙여넣기 실패가 있을 때만 값을 조금 높여보세요."
+              min={50}
+              max={500}
+              step={25}
+              value={settings.pasteDelayMs}
+              onChange={handlePasteDelayChange}
+              disabled={isLoading}
+            />
+
+            <SettingsRow
+              title="로그인 시 시작"
+              description="macOS 로그인 후 TransClip을 자동으로 실행합니다."
+            >
+              <Switch
+                checked={settings.launchAtLogin}
+                onChange={handleLaunchAtLoginChange}
+                disabled={isLoading}
+                label="로그인 시 시작"
+              />
+            </SettingsRow>
+
+            <SettingsRow title="접근성 권한" description="더블 프레스 감지에 필요합니다.">
+              {accessibilityGranted === true && (
+                <Badge tone="green" icon="check">
+                  허용됨
+                </Badge>
               )}
-              {error && (
-                <p className="mt-2 text-[11px] text-red-600">{error}</p>
+              {accessibilityGranted === false && <Badge tone="orange">필요</Badge>}
+              {accessibilityGranted === false && (
+                <Button size="sm" variant="primary" onClick={handleRequestAccessibility}>
+                  허용
+                </Button>
               )}
-            </div>
-          </div>
+              {accessibilityGranted === true && (
+                <Button size="sm" onClick={() => void checkAccessibilityStatus()}>
+                  새로고침
+                </Button>
+              )}
+            </SettingsRow>
+          </SettingsSection>
 
-          {isAiAdvancedOpen && (
-            <div className="border-t border-slate-200 bg-slate-50/60 px-4 py-4">
-              <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-                <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <h3 className="text-xs font-semibold text-slate-700">Provider 연결</h3>
-                    <span className="text-[10px] text-slate-500">URL은 Gateway 모드에서만 수정됩니다.</span>
-                  </div>
-                  <div className="space-y-2">
-                    {settings.aiProviderConfigs.map((provider) => {
-                      const publicAccount = `provider:${provider.id}`;
-                      return (
-                        <div key={provider.id} className="rounded-md border border-slate-200 bg-white p-3">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div>
-                              <div className="text-xs font-medium text-slate-800">
-                                {providerLabel(provider.providerKind)}
-                              </div>
-                              <div className="text-[11px] text-slate-500">
-                                {provider.endpointMode === "custom" ? "Gateway URL 사용" : "Public API 사용"}
-                              </div>
-                            </div>
-                            <div className="inline-flex rounded-md border border-slate-300 bg-slate-100 p-0.5">
-                              {(["public", "custom"] as EndpointMode[]).map((mode) => (
-                                <button
-                                  key={mode}
-                                  type="button"
-                                  onClick={() => handleProviderEndpointModeChange(provider.id, mode)}
-                                  disabled={isLoading}
-                                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
-                                    provider.endpointMode === mode
-                                      ? "bg-white text-slate-900 shadow-sm"
-                                      : "text-slate-500 hover:text-slate-800"
-                                  }`}
-                                >
-                                  {mode === "public" ? "Public" : "Gateway"}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                          <div className="mt-3 flex items-center gap-2">
-                            <input
-                              type="url"
-                              value={providerBaseUrls[provider.id] ?? provider.baseUrl}
-                              onChange={(e) => setProviderBaseUrls((current) => ({
-                                ...current,
-                                [provider.id]: e.target.value,
-                              }))}
-                              onBlur={() => handleProviderBaseUrlSave(provider.id)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  e.currentTarget.blur();
-                                }
-                              }}
-                              placeholder={PROVIDER_DEFAULT_ENDPOINTS[provider.providerKind]}
-                              className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100 disabled:text-slate-500"
-                              disabled={isLoading || provider.endpointMode === "public"}
-                            />
-                            <button
-                              type="button"
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => handleProviderBaseUrlReset(provider.id, provider.providerKind)}
-                              disabled={isLoading || provider.endpointMode === "public"}
-                              className="shrink-0 rounded-md border border-slate-300 px-2 py-1.5 text-[11px] font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              기본값
-                            </button>
-                          </div>
-                          {provider.endpointMode === "public" && (
-                            <div className="mt-3 border-t border-slate-100 pt-3">
-                              <ApiKeyInput
-                                account={publicAccount}
-                                hasApiKey={aiApiKeyStatus[publicAccount]?.exists ?? false}
-                                label={`${providerLabel(provider.providerKind)} API 키`}
-                                description="Public API 호출에 사용됩니다."
-                              />
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                    {activeGatewayProviders.length > 0 && (
-                      <div className="rounded-md border border-slate-200 bg-white p-3">
-                        <ApiKeyInput
-                          account={CUSTOM_ENDPOINT_API_KEY_ACCOUNT}
-                          hasApiKey={customKeyReady}
-                          label="Gateway 공통 API 키"
-                          description="Gateway 모드의 provider가 함께 사용합니다."
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
+          <SettingsSection title="정보">
+            <SettingsRow
+              title={
+                <span className="flex flex-wrap items-center gap-2">
+                  <span>TransClip v{currentVersion ?? "..."}</span>
+                  {hasUpdate && latestVersion && <Badge tone="green">새 버전 v{latestVersion}</Badge>}
+                </span>
+              }
+            >
+              <Button
+                size="sm"
+                onClick={handleCheckForUpdate}
+                disabled={isCheckingUpdate || isDownloading}
+              >
+                {isCheckingUpdate ? "확인 중..." : "업데이트 확인"}
+              </Button>
 
-                <div>
-                  <h3 className="mb-2 text-xs font-semibold text-slate-700">모델 관리</h3>
-                  <div className="space-y-2 rounded-md border border-slate-200 bg-white p-3">
-                    <select
-                      value={newModelProviderId}
-                      onChange={(e) => setNewModelProviderId(e.target.value)}
-                      className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900"
-                      disabled={isLoading}
-                    >
-                      {settings.aiProviderConfigs.map((provider) => (
-                        <option key={provider.id} value={provider.id}>
-                          {providerLabel(provider.providerKind)}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      value={newModelDisplayName}
-                      onChange={(e) => setNewModelDisplayName(e.target.value)}
-                      placeholder="표시 이름"
-                      className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900"
-                      disabled={isLoading}
-                    />
-                    <div className="flex items-center gap-2">
-                      <input
-                        value={newModelId}
-                        onChange={(e) => setNewModelId(e.target.value)}
-                        placeholder="model id"
-                        className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900"
-                        disabled={isLoading}
-                      />
-                      <button
-                        type="button"
-                        onClick={handleAddModelProfile}
-                        disabled={isLoading || !newModelDisplayName.trim() || !newModelId.trim()}
-                        className="shrink-0 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        추가
-                      </button>
-                    </div>
-                  </div>
+              {hasUpdate && (
+                <>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={handleInstallUpdate}
+                    disabled={isDownloading}
+                  >
+                    {isDownloading ? `다운로드 중... ${progress}%` : "업데이트"}
+                  </Button>
+                  <Button size="sm" variant="plain" onClick={dismissUpdate} disabled={isDownloading}>
+                    나중에
+                  </Button>
+                </>
+              )}
+            </SettingsRow>
 
-                  <div className="mt-3 max-h-64 overflow-y-auto rounded-md border border-slate-200 bg-white">
-                    {settings.aiModelProfiles.map((model) => {
-                      const isPreferred = model.id === preferredModelId;
-                      const isEditing = editingModelId === model.id;
-                      return (
-                        <div key={model.id} className="border-b border-slate-100 p-3 text-xs last:border-b-0">
-                          {isEditing ? (
-                            <div className="space-y-2">
-                              <select
-                                value={editModelProviderId}
-                                onChange={(e) => setEditModelProviderId(e.target.value)}
-                                className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs"
-                                disabled={isLoading}
-                              >
-                                {settings.aiProviderConfigs.map((provider) => (
-                                  <option key={provider.id} value={provider.id}>
-                                    {providerLabel(provider.providerKind)}
-                                  </option>
-                                ))}
-                              </select>
-                              <input
-                                value={editModelDisplayName}
-                                onChange={(e) => setEditModelDisplayName(e.target.value)}
-                                className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs"
-                                disabled={isLoading}
-                              />
-                              <input
-                                value={editModelId}
-                                onChange={(e) => setEditModelId(e.target.value)}
-                                className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs"
-                                disabled={isLoading}
-                              />
-                              <div className="flex justify-end gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdateModelProfile(model)}
-                                  className="rounded bg-blue-600 px-2 py-1 text-[11px] font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
-                                  disabled={isLoading || !editModelDisplayName.trim() || !editModelId.trim()}
-                                >
-                                  저장
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={cancelEditModelProfile}
-                                  className="rounded px-2 py-1 text-[11px] text-slate-600 transition-colors hover:bg-slate-100"
-                                  disabled={isLoading}
-                                >
-                                  취소
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="min-w-0">
-                                <div className="truncate font-medium text-slate-800">
-                                  {formatModelProfileOption(model, settings.aiProviderConfigs, preferredModelId)}
-                                </div>
-                                <div className="truncate text-[11px] text-slate-500">
-                                  {model.modelId}
-                                </div>
-                              </div>
-                              <div className="shrink-0 flex items-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => beginEditModelProfile(model)}
-                                  className="rounded px-1.5 py-0.5 text-[11px] text-slate-600 transition-colors hover:bg-slate-100"
-                                  disabled={isLoading}
-                                >
-                                  수정
-                                </button>
-                                {!isPreferred && (
-                                  <button
-                                    type="button"
-                                    onClick={() => deleteAiModelProfile(model.id)}
-                                    className="rounded px-1.5 py-0.5 text-[11px] text-red-600 transition-colors hover:bg-red-50"
-                                    disabled={isLoading}
-                                  >
-                                    삭제
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </section>
-
-        <section className="md:col-span-2 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-200 px-4 py-3">
-            <h2 className="text-sm font-semibold text-slate-900">사용 환경</h2>
-            <p className="mt-0.5 text-xs text-slate-500">
-              단축키, 저장 개수, 붙여넣기 동작을 조정합니다.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 divide-y divide-slate-200 md:grid-cols-2 md:divide-x md:divide-y-0">
-            <div className="divide-y divide-slate-100">
-              <RangeSetting
-                title="단축키 감지"
-                valueLabel={`${settings.doublePressInterval}ms`}
-                description="더블 프레스 입력으로 번역을 시작하는 시간 간격입니다."
-                min={200}
-                max={1000}
-                step={50}
-                value={settings.doublePressInterval}
-                onChange={handleDoublePressIntervalChange}
-                disabled={isLoading}
-              />
-              <RangeSetting
-                title="클립보드 저장"
-                valueLabel={`${settings.maxHistoryCount}개`}
-                description="최근 복사 기록을 보관할 최대 개수입니다."
-                min={10}
-                max={200}
-                step={10}
-                value={settings.maxHistoryCount}
-                onChange={handleMaxHistoryChange}
-                disabled={isLoading}
-              />
-            </div>
-
-            <div className="divide-y divide-slate-100">
-              <RangeSetting
-                title="붙여넣기 딜레이"
-                valueLabel={`${settings.pasteDelayMs}ms`}
-                description="붙여넣기 실패가 있을 때만 값을 조금 높여보세요."
-                min={50}
-                max={500}
-                step={25}
-                value={settings.pasteDelayMs}
-                onChange={handlePasteDelayChange}
-                disabled={isLoading}
-              />
-
-              <div className="px-4 py-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <div className="text-xs font-semibold text-slate-900">로그인 시 시작</div>
-                    <p className="mt-1 text-[11px] text-slate-500">
-                      macOS 로그인 후 TransClip을 자동으로 실행합니다.
-                    </p>
-                  </div>
-                  <ToggleSwitch
-                    enabled={settings.launchAtLogin}
-                    onChange={handleLaunchAtLoginChange}
-                    disabled={isLoading}
-                    label="로그인 시 시작"
+            {isDownloading && (
+              <div className="form-row flex-col items-stretch gap-1.5">
+                <div
+                  className="h-1.5 overflow-hidden rounded-full bg-fill-2"
+                  role="progressbar"
+                  aria-label="업데이트 다운로드 진행률"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={progress}
+                  aria-valuetext={`${progress}%`}
+                >
+                  <div
+                    className="h-full rounded-full bg-accent transition-all"
+                    style={{ width: `${progress}%` }}
                   />
                 </div>
-
-                <div className="mt-4 flex items-center justify-between gap-4 rounded-md bg-slate-50 px-3 py-2">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium text-slate-800">접근성 권한</span>
-                      {accessibilityGranted === true && (
-                        <StatusBadge tone="success">허용됨</StatusBadge>
-                      )}
-                      {accessibilityGranted === false && (
-                        <StatusBadge tone="warning">필요</StatusBadge>
-                      )}
-                    </div>
-                    <p className="mt-0.5 truncate text-[11px] text-slate-500">
-                      더블 프레스 감지에 필요합니다.
-                    </p>
-                  </div>
-                  {accessibilityGranted === false && (
-                    <button
-                      onClick={handleRequestAccessibility}
-                      className="shrink-0 rounded-md bg-blue-600 px-2.5 py-1.5 text-[11px] font-medium text-white transition-colors hover:bg-blue-700"
-                    >
-                      허용
-                    </button>
-                  )}
-                  {accessibilityGranted === true && (
-                    <button
-                      onClick={checkAccessibilityStatus}
-                      className="shrink-0 rounded-md border border-slate-300 px-2.5 py-1.5 text-[11px] font-medium text-slate-600 transition-colors hover:bg-white"
-                    >
-                      새로고침
-                    </button>
-                  )}
-                </div>
+                <p className="text-caption text-label-3">업데이트 다운로드 중 ({progress}%)</p>
               </div>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <div className="mt-5 space-y-2 border-t border-slate-200 pt-4 text-xs text-slate-500">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span>TransClip v{currentVersion ?? "..."}</span>
-            {hasUpdate && latestVersion && (
-              <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
-                새 버전 v{latestVersion}
-              </span>
             )}
-          </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-50"
-              onClick={handleCheckForUpdate}
-              disabled={isCheckingUpdate || isDownloading}
-            >
-              {isCheckingUpdate ? "확인 중..." : "업데이트 확인"}
-            </button>
-
-            {hasUpdate && (
-              <>
-                <button
-                  type="button"
-                  className="rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
-                  onClick={handleInstallUpdate}
-                  disabled={isDownloading}
-                >
-                  {isDownloading ? `다운로드 중... ${progress}%` : "업데이트"}
-                </button>
-                <button
-                  type="button"
-                  className="rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-50"
-                  onClick={dismissUpdate}
-                  disabled={isDownloading}
-                >
-                  나중에
-                </button>
-              </>
+            {updateError && (
+              <div className="form-row">
+                <p className="text-caption text-red-fg">업데이트 오류: {updateError}</p>
+              </div>
             )}
 
             <button
               type="button"
-              className="flex items-center gap-1 rounded-md px-1.5 py-1 text-slate-500 transition-colors hover:bg-slate-50 hover:text-blue-700"
+              className="form-row w-full text-left transition-colors hover:bg-fill"
               onClick={() => {
                 void invoke("open_feedback_page").catch((err) => {
                   console.error("Failed to open feedback page:", err);
                 });
               }}
             >
-              <span>버그 제보 · 기능 제안</span>
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
+              <span className="min-w-0 flex-1 text-body text-label">버그 제보 · 기능 제안</span>
+              <Icon name="external-link" size={15} className="shrink-0 text-label-3" />
             </button>
-          </div>
+          </SettingsSection>
         </div>
 
-        {isDownloading && (
-          <div className="space-y-1">
-            <div
-              className="h-1.5 overflow-hidden rounded-full bg-slate-200"
-              role="progressbar"
-              aria-label="업데이트 다운로드 진행률"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={progress}
-              aria-valuetext={`${progress}%`}
-            >
-              <div className="h-full bg-blue-600 transition-all" style={{ width: `${progress}%` }} />
-            </div>
-            <p className="text-[10px] text-slate-500">업데이트 다운로드 중 ({progress}%)</p>
-          </div>
-        )}
+        {/* Advanced AI settings */}
+        {isAiAdvancedOpen && (
+          <div className="animate-fade-in grid grid-cols-1 items-start gap-x-6 gap-y-5 md:col-span-2 md:grid-cols-2">
+            <div className="space-y-3">
+              <div className="flex items-baseline justify-between gap-3 px-1">
+                <h2 className="text-sub font-semibold text-label-2">Provider 연결</h2>
+                <span className="text-caption text-label-3">URL은 Gateway 모드에서만 수정됩니다.</span>
+              </div>
 
-        {updateError && (
-          <p className="text-[10px] text-red-600">
-            업데이트 오류: {updateError}
-          </p>
+              {settings.aiProviderConfigs.map((provider) => {
+                const publicAccount = `provider:${provider.id}`;
+                return (
+                  <div key={provider.id} className="form-group">
+                    <SettingsRow
+                      title={providerLabel(provider.providerKind)}
+                      description={provider.endpointMode === "custom" ? "Gateway URL 사용" : "Public API 사용"}
+                    >
+                      <Segmented<EndpointMode>
+                        ariaLabel={`${providerLabel(provider.providerKind)} 연결 방식`}
+                        value={provider.endpointMode}
+                        disabled={isLoading}
+                        options={[
+                          { value: "public", label: "Public" },
+                          { value: "custom", label: "Gateway" },
+                        ]}
+                        onChange={(mode) => handleProviderEndpointModeChange(provider.id, mode)}
+                      />
+                    </SettingsRow>
+
+                    <div className="form-row">
+                      <input
+                        type="url"
+                        aria-label={`${providerLabel(provider.providerKind)} 엔드포인트 URL`}
+                        value={providerBaseUrls[provider.id] ?? provider.baseUrl}
+                        onChange={(e) => setProviderBaseUrls((current) => ({
+                          ...current,
+                          [provider.id]: e.target.value,
+                        }))}
+                        onBlur={() => handleProviderBaseUrlSave(provider.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.currentTarget.blur();
+                          }
+                        }}
+                        placeholder={PROVIDER_DEFAULT_ENDPOINTS[provider.providerKind]}
+                        className="field field-sm min-w-0 flex-1"
+                        disabled={isLoading || provider.endpointMode === "public"}
+                      />
+                      <Button
+                        size="sm"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => handleProviderBaseUrlReset(provider.id, provider.providerKind)}
+                        disabled={isLoading || provider.endpointMode === "public"}
+                      >
+                        기본값
+                      </Button>
+                    </div>
+
+                    {provider.endpointMode === "public" && (
+                      <div className="form-row">
+                        <ApiKeyInput
+                          account={publicAccount}
+                          hasApiKey={aiApiKeyStatus[publicAccount]?.exists ?? false}
+                          label={`${providerLabel(provider.providerKind)} API 키`}
+                          description="Public API 호출에 사용됩니다."
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {activeGatewayProviders.length > 0 && (
+                <div className="form-group">
+                  <div className="form-row">
+                    <ApiKeyInput
+                      account={CUSTOM_ENDPOINT_API_KEY_ACCOUNT}
+                      hasApiKey={customKeyReady}
+                      label="Gateway 공통 API 키"
+                      description="Gateway 모드의 provider가 함께 사용합니다."
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <h2 className="px-1 text-sub font-semibold text-label-2">모델 관리</h2>
+
+              <div className="form-group">
+                <div className="form-row">
+                  <Select
+                    aria-label="새 모델의 Provider"
+                    block
+                    value={newModelProviderId}
+                    onChange={(e) => setNewModelProviderId(e.target.value)}
+                    disabled={isLoading}
+                  >
+                    {settings.aiProviderConfigs.map((provider) => (
+                      <option key={provider.id} value={provider.id}>
+                        {providerLabel(provider.providerKind)}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="form-row">
+                  <input
+                    value={newModelDisplayName}
+                    onChange={(e) => setNewModelDisplayName(e.target.value)}
+                    placeholder="표시 이름"
+                    aria-label="표시 이름"
+                    className="field field-sm"
+                    disabled={isLoading}
+                  />
+                </div>
+                <div className="form-row">
+                  <input
+                    value={newModelId}
+                    onChange={(e) => setNewModelId(e.target.value)}
+                    placeholder="model id"
+                    aria-label="model id"
+                    className="field field-sm min-w-0 flex-1"
+                    disabled={isLoading}
+                  />
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={handleAddModelProfile}
+                    disabled={isLoading || !newModelDisplayName.trim() || !newModelId.trim()}
+                  >
+                    추가
+                  </Button>
+                </div>
+              </div>
+
+              <div className="form-group max-h-64 overflow-y-auto">
+                {settings.aiModelProfiles.map((model) => {
+                  const isPreferred = model.id === preferredModelId;
+                  const isEditing = editingModelId === model.id;
+                  return isEditing ? (
+                    <div key={model.id} className="form-row flex-col items-stretch gap-2">
+                      <Select
+                        aria-label="Provider"
+                        block
+                        value={editModelProviderId}
+                        onChange={(e) => setEditModelProviderId(e.target.value)}
+                        disabled={isLoading}
+                      >
+                        {settings.aiProviderConfigs.map((provider) => (
+                          <option key={provider.id} value={provider.id}>
+                            {providerLabel(provider.providerKind)}
+                          </option>
+                        ))}
+                      </Select>
+                      <input
+                        value={editModelDisplayName}
+                        onChange={(e) => setEditModelDisplayName(e.target.value)}
+                        aria-label="표시 이름"
+                        className="field field-sm"
+                        disabled={isLoading}
+                      />
+                      <input
+                        value={editModelId}
+                        onChange={(e) => setEditModelId(e.target.value)}
+                        aria-label="model id"
+                        className="field field-sm"
+                        disabled={isLoading}
+                      />
+                      <div className="flex justify-end gap-1.5">
+                        <Button size="sm" variant="plain" onClick={cancelEditModelProfile} disabled={isLoading}>
+                          취소
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          onClick={() => handleUpdateModelProfile(model)}
+                          disabled={isLoading || !editModelDisplayName.trim() || !editModelId.trim()}
+                        >
+                          저장
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <SettingsRow
+                      key={model.id}
+                      title={formatModelProfileOption(model, settings.aiProviderConfigs, preferredModelId)}
+                      description={model.modelId}
+                    >
+                      <Button
+                        size="sm"
+                        variant="plain"
+                        onClick={() => beginEditModelProfile(model)}
+                        disabled={isLoading}
+                      >
+                        수정
+                      </Button>
+                      {!isPreferred && (
+                        <Button
+                          size="sm"
+                          variant="plain"
+                          className="hover:!text-red-fg"
+                          onClick={() => deleteAiModelProfile(model.id)}
+                          disabled={isLoading}
+                        >
+                          삭제
+                        </Button>
+                      )}
+                    </SettingsRow>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>
   );
 }
 
-interface RangeSettingProps {
+interface SettingsSectionProps {
+  title: string;
+  footer?: ReactNode;
+  children: ReactNode;
+}
+
+/** Titled, inset group of rows — the System Settings pattern. */
+function SettingsSection({ title, footer, children }: SettingsSectionProps) {
+  return (
+    <section>
+      <h2 className="mb-1.5 px-1 text-sub font-semibold text-label-2">{title}</h2>
+      <div className="form-group">{children}</div>
+      {footer && <p className="mt-1.5 space-y-0.5 px-1 text-caption text-label-3">{footer}</p>}
+    </section>
+  );
+}
+
+interface SettingsRowProps {
+  title: ReactNode;
+  description?: string;
+  children?: ReactNode;
+}
+
+function SettingsRow({ title, description, children }: SettingsRowProps) {
+  return (
+    <div className="form-row">
+      <div className="min-w-0 flex-1">
+        <div className="text-body text-label">{title}</div>
+        {description && <p className="mt-0.5 text-caption text-label-3">{description}</p>}
+      </div>
+      {children && <div className="flex shrink-0 items-center gap-2">{children}</div>}
+    </div>
+  );
+}
+
+interface SliderRowProps {
   title: string;
   valueLabel: string;
   description: string;
@@ -839,7 +804,7 @@ interface RangeSettingProps {
   disabled?: boolean;
 }
 
-function RangeSetting({
+function SliderRow({
   title,
   valueLabel,
   description,
@@ -849,72 +814,20 @@ function RangeSetting({
   value,
   onChange,
   disabled,
-}: RangeSettingProps) {
+}: SliderRowProps) {
   return (
-    <div className="px-4 py-4">
-      <div className="mb-3 flex items-start justify-between gap-4">
-        <div>
-          <div className="text-xs font-semibold text-slate-900">{title}</div>
-          <p className="mt-1 text-[11px] text-slate-500">{description}</p>
-        </div>
-        <span className="shrink-0 rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
-          {valueLabel}
-        </span>
-      </div>
-      <input
-        type="range"
+    <SettingsRow title={title} description={description}>
+      <Slider
+        label={title}
+        className="w-[170px]"
         min={min}
         max={max}
         step={step}
         value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full accent-blue-600"
+        onChange={onChange}
         disabled={disabled}
       />
-    </div>
-  );
-}
-
-interface StatusBadgeProps {
-  tone: "success" | "warning";
-  children: React.ReactNode;
-}
-
-function StatusBadge({ tone, children }: StatusBadgeProps) {
-  const className = tone === "success"
-    ? "bg-emerald-50 text-emerald-700"
-    : "bg-amber-50 text-amber-700";
-  return (
-    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${className}`}>
-      {children}
-    </span>
-  );
-}
-
-interface ToggleSwitchProps {
-  enabled: boolean;
-  onChange: (enabled: boolean) => void;
-  disabled?: boolean;
-  label: string;
-}
-
-function ToggleSwitch({ enabled, onChange, disabled, label }: ToggleSwitchProps) {
-  return (
-    <button
-      onClick={() => onChange(!enabled)}
-      aria-pressed={enabled}
-      aria-label={`${label} ${enabled ? "켜짐" : "꺼짐"}`}
-      aria-disabled={disabled}
-      className={`relative h-5 w-9 rounded-full transition-colors ${
-        enabled ? "bg-blue-600" : "bg-slate-300"
-      }`}
-      disabled={disabled}
-    >
-      <span
-        className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
-          enabled ? "translate-x-4" : ""
-        }`}
-      />
-    </button>
+      <span className="w-[52px] text-right text-sub tabular-nums text-label-2">{valueLabel}</span>
+    </SettingsRow>
   );
 }

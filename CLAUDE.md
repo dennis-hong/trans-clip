@@ -75,6 +75,16 @@ App.tsx manages a `popupMode` state (`"none" | "translate" | "polish" | "history
 - Window: transparent, no decorations, always-on-top
 - Requires Accessibility permission for hotkey interception
 
+### UI Design System (macOS "glass")
+
+- **Window**: the main window is a floating glass panel — native vibrancy (`windowEffects` in `tauri.conf.json`: `popover` material, radius 20) with the web UI drawn as translucent tints on top. Keep the CSS `.panel` radius equal to the native radius. `WINDOW_BOTTOM_MARGIN` (`src-tauri/src/utils/monitor.rs`) keeps the panel off the screen edge; every bottom-anchored position calculation must subtract it.
+- **Tokens**: colors/shadows are CSS variables in `src/styles.css` (light + dark via `prefers-color-scheme`) mapped to a *closed* Tailwind palette in `tailwind.config.js` (`text-label`/`label-2`/`label-3`, `bg-fill`, `bg-surface`, `border-separator`, `accent`, `purple`, …). Stock Tailwind colors (`gray-500`, `blue-600`) do not exist; don't add `dark:` variants.
+- **Primitives** live in `src/components/common` (Button, IconButton, Icon, Kbd, Select, Switch, Slider, Segmented, Badge, Spinner, Toast, Modal). Use them instead of ad-hoc markup; icons are the in-repo SF-Symbols-style set in `Icon.tsx`.
+- **Tailwind only keeps class names it can find as complete literals.** Never compose them with template strings (`` `tone-${x}` ``); use a lookup map (see `TONE_CLASS`).
+- **Feature tone**: wrap a view in `tone-accent` (translate) or `tone-purple` (polish, glossary); `.btn-primary`, `.pane-result`, `.badge` read it through `--tone`.
+- **Native feel**: arrow cursor on buttons, non-selectable chrome (opt in with `selectable`), `:focus-visible` ring, native overlay scrollbars (don't style `::-webkit-scrollbar`), reduced motion respected.
+- **Popup sizing**: `TranslationPopup`/`PolishPopup` measure their own chrome (`containerRef`, `sourceTextareaRef`, `resultContainerRef`) to size the window; keep exactly one flexible text area per pane.
+
 ## Code Conventions
 
 - TypeScript path alias: `@/*` → `src/*`

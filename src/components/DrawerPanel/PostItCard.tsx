@@ -1,9 +1,11 @@
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback } from "react";
+import { Icon, IconButton, Kbd } from "@/components/common";
 import type { ClipboardItem } from "@/types";
 
 interface PostItCardProps {
   item: ClipboardItem;
   index?: number;
+  /** Optional note color class (note-yellow, note-blue, …); defaults to a stable color per item. */
   color?: string;
   onCopy: (item: ClipboardItem) => void;
   onPaste?: (item: ClipboardItem) => void;
@@ -15,13 +17,16 @@ interface PostItCardProps {
   showPasteButton?: boolean;
 }
 
+/** Width of a note in the drawer strip (px). Keep in sync with keyboard scrolling. */
+export const POSTIT_CARD_WIDTH = 204;
+
 const COLORS = [
-  "bg-yellow-100 border-yellow-300",
-  "bg-blue-100 border-blue-300",
-  "bg-green-100 border-green-300",
-  "bg-pink-100 border-pink-300",
-  "bg-purple-100 border-purple-300",
-  "bg-orange-100 border-orange-300",
+  "note-yellow",
+  "note-blue",
+  "note-green",
+  "note-pink",
+  "note-purple",
+  "note-orange",
 ];
 
 function getColorFromId(id: string): string {
@@ -30,11 +35,31 @@ function getColorFromId(id: string): string {
     hash = id.charCodeAt(i) + ((hash << 5) - hash);
   }
   const colorIndex = Math.abs(hash) % COLORS.length;
-  return COLORS[colorIndex] || "bg-yellow-100 border-yellow-300";
+  return COLORS[colorIndex] || "note-yellow";
+}
+
+function formatTime(dateStr: string) {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+
+  if (diffMins < 1) return "방금";
+  if (diffMins < 60) return `${diffMins}분`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}시간`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}일`;
+}
+
+// Extract title from content (first line or first 30 chars)
+function getTitle(content: string): string {
+  const firstLine = (content.split("\n")[0] ?? "").trim();
+  if (firstLine.length <= 30) return firstLine;
+  return firstLine.substring(0, 27) + "...";
 }
 
 export const PostItCard = memo(function PostItCard({ item, index, color, onCopy, onPaste, onDelete, onTogglePin, onTranslate, onPolish, onEdit, showPasteButton }: PostItCardProps) {
-  const [isHovered, setIsHovered] = useState(false);
   const cardColor = color || getColorFromId(item.id);
 
   const handleCopy = useCallback(() => {
@@ -120,200 +145,78 @@ export const PostItCard = memo(function PostItCard({ item, index, color, onCopy,
     [item, onCopy]
   );
 
-  const formatTime = (dateStr: string) => {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-
-    if (diffMins < 1) return "방금";
-    if (diffMins < 60) return `${diffMins}분`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}시간`;
-    const diffDays = Math.floor(diffHours / 24);
-    return `${diffDays}일`;
-  };
-
-  // Extract title from content (first line or first 20 chars)
-  const getTitle = (content: string): string => {
-    const firstLine = (content.split("\n")[0] ?? "").trim();
-    if (firstLine.length <= 30) return firstLine;
-    return firstLine.substring(0, 27) + "...";
-  };
-
   return (
     <div
       onClick={handleCopy}
       onDoubleClick={handleDoubleClick}
       onKeyDown={handleKeyDown}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
       role="button"
       tabIndex={0}
       aria-label={`메모 ${getTitle(item.content)} 복사`}
-      className={`
-        relative flex-shrink-0 w-48 h-48 p-3 rounded-lg border-2 cursor-pointer
-        transition-all duration-200 ease-out
-        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1
-        ${cardColor}
-        ${isHovered ? "scale-105 shadow-lg -translate-y-1" : "shadow-md"}
-        ${item.isPinned ? "ring-2 ring-blue-500" : ""}
-      `}
-      style={{
-        transform: isHovered ? "scale(1.05) translateY(-4px)" : "none",
-      }}
+      className={`group note ${cardColor} ${item.isPinned ? "note-pinned" : ""} h-full cursor-default px-3.5 pb-2 pt-3.5`}
+      style={{ width: POSTIT_CARD_WIDTH }}
     >
-      {/* Quick select number badge (1-9) */}
-      {index !== undefined && index < 9 && (
-        <div className="absolute -top-2 -left-2 w-5 h-5 bg-gray-700 text-white rounded-full flex items-center justify-center shadow-md text-xs font-bold">
-          {index + 1}
-        </div>
-      )}
-
-      {/* Top right area: Pin indicator and Delete button */}
-      <div className="absolute -top-2 -right-2 flex items-center gap-1">
-        {/* Delete button - visible on hover */}
-        <button
-          onClick={handleDelete}
-          className={`w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center shadow-md transition-all duration-150 ${
-            isHovered ? "opacity-100 scale-100" : "opacity-0 scale-75"
-          }`}
-          title="삭제"
-        >
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2.5}
-              d="M6 18L18 6M6 6l12 12"
-            />
-          </svg>
-        </button>
-        {/* Pin indicator */}
+      {/* Title row: quick-select key, first line, pin state */}
+      <div className="flex items-start gap-2">
+        {index !== undefined && index < 9 && (
+          <Kbd className="mt-px" aria-hidden="true">
+            {index + 1}
+          </Kbd>
+        )}
+        <h3 className="min-w-0 flex-1 truncate text-headline text-label">
+          {getTitle(item.content)}
+        </h3>
         {item.isPinned && (
-          <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center shadow-md">
-            <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
-            </svg>
-          </div>
+          <Icon name="pin-fill" size={13} className="mt-0.5 shrink-0 text-accent" />
         )}
       </div>
 
-      {/* Title */}
-      <div className="font-semibold text-gray-800 text-sm mb-2 truncate">
-        {getTitle(item.content)}
-      </div>
-
       {/* Content preview */}
-      <div className="text-xs text-gray-600 overflow-hidden line-clamp-5 leading-relaxed">
+      <p className="mt-2 line-clamp-5 flex-1 overflow-hidden break-keep text-sub leading-[18px] text-label-2 [overflow-wrap:anywhere]">
         {item.contentPreview}
-      </div>
+      </p>
 
-      {/* Footer */}
-      <div className="absolute bottom-2 left-3 right-3 flex items-center justify-between">
-        <span className="text-[10px] text-gray-500">
-          {formatTime(item.copiedAt)}
-          {item.metadata && ` · ${item.metadata.characterCount}자`}
-          {item.updatedAt && (
-            <span className="ml-1 text-amber-600" title={`편집됨: ${item.updatedAt}`}>
-              (편집됨)
-            </span>
-          )}
-        </span>
+      {/* Footer: meta at rest, actions on hover / keyboard focus */}
+      <div className="relative mt-1 h-7 shrink-0">
+        <div className="absolute inset-0 flex items-center justify-between text-caption text-label-3 transition-opacity duration-150 group-focus-within:opacity-0 group-hover:opacity-0">
+          <span className="flex items-center gap-1.5">
+            {formatTime(item.copiedAt)}
+            {item.updatedAt && <span title={`편집됨: ${item.updatedAt}`}>편집됨</span>}
+          </span>
+          {item.metadata && <span className="tabular-nums">{item.metadata.characterCount}자</span>}
+        </div>
 
-        {/* Action buttons - visible on hover */}
-        <div
-          className={`flex gap-0.5 transition-opacity duration-150 ${
-            isHovered ? "opacity-100" : "opacity-0"
-          }`}
-        >
-          {/* Translate button */}
+        <div className="absolute -inset-x-1 inset-y-0 flex items-center justify-between opacity-0 transition-opacity duration-150 group-focus-within:opacity-100 group-hover:opacity-100">
           {onTranslate && (
-            <button
+            <IconButton
+              icon="translate"
+              label="번역"
+              size="sm"
+              className="hover:text-accent-fg"
               onClick={handleTranslate}
-              className="p-1 rounded hover:bg-black/10 transition-colors"
-              title="번역"
-            >
-              <svg className="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"
-                />
-              </svg>
-            </button>
+            />
           )}
-          {/* Polish button */}
           {onPolish && (
-            <button
+            <IconButton
+              icon="sparkles"
+              label="다듬기"
+              size="sm"
+              className="hover:text-purple-fg"
               onClick={handlePolish}
-              className="p-1 rounded hover:bg-black/10 transition-colors"
-              title="다듬기"
-            >
-              <svg className="w-3.5 h-3.5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                />
-              </svg>
-            </button>
+            />
           )}
-          {/* Edit button */}
-          {onEdit && (
-            <button
-              onClick={handleEdit}
-              className="p-1 rounded hover:bg-black/10 transition-colors"
-              title="편집"
-            >
-              <svg className="w-3.5 h-3.5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                />
-              </svg>
-            </button>
-          )}
-          {/* Paste button - only shown in stealth mode */}
+          {onEdit && <IconButton icon="square-pencil" label="편집" size="sm" onClick={handleEdit} />}
           {showPasteButton && onPaste && (
-            <button
-              onClick={handlePaste}
-              className="p-1 rounded hover:bg-black/10 transition-colors"
-              title="붙여넣기"
-            >
-              <svg className="w-3.5 h-3.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
-                />
-              </svg>
-            </button>
+            <IconButton icon="clipboard" label="붙여넣기" size="sm" onClick={handlePaste} />
           )}
-          <button
+          <IconButton
+            icon={item.isPinned ? "pin-fill" : "pin"}
+            label={item.isPinned ? "고정 해제" : "고정"}
+            size="sm"
+            className={item.isPinned ? "text-accent hover:text-accent" : ""}
             onClick={handleTogglePin}
-            className="p-1 rounded hover:bg-black/10 transition-colors"
-            title={item.isPinned ? "고정 해제" : "고정"}
-          >
-            <svg
-              className={`w-3.5 h-3.5 ${item.isPinned ? "text-blue-600" : "text-gray-500"}`}
-              fill={item.isPinned ? "currentColor" : "none"}
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"
-              />
-            </svg>
-          </button>
+          />
+          <IconButton icon="trash" label="삭제" size="sm" danger onClick={handleDelete} />
         </div>
       </div>
     </div>

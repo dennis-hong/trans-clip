@@ -55,7 +55,7 @@ pub fn set_double_press_interval(interval_ms: u64) {
 /// the cursor monitor and then the primary monitor.
 pub fn show_window_at_position(window: &tauri::WebviewWindow) {
     use crate::utils::monitor::{
-        generate_monitor_key, get_logical_bounds, sort_monitors_by_position,
+        generate_monitor_key, get_logical_bounds, sort_monitors_by_position, WINDOW_BOTTOM_MARGIN,
     };
 
     // Calculate and set position before showing
@@ -94,7 +94,7 @@ pub fn show_window_at_position(window: &tauri::WebviewWindow) {
                 resolve_restored_window_size(bounds.width, current_logical_size, saved_width);
 
             let x = bounds.x + (bounds.width - win_width) / 2;
-            let y = bounds.y + bounds.height - win_height;
+            let y = bounds.y + bounds.height - win_height - WINDOW_BOTTOM_MARGIN;
 
             if let Err(err) = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
                 width: win_width as f64,

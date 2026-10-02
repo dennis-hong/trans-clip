@@ -5,9 +5,18 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Event as TauriEvent } from "@tauri-apps/api/event";
 import { useClipboardStore } from "@/store";
 import { useWindowDrag } from "@/hooks/useWindowDrag";
-import { PostItCard } from "./PostItCard";
+import { PostItCard, POSTIT_CARD_WIDTH } from "./PostItCard";
 import { CreatePostItCard } from "./CreatePostItCard";
-import { Toast } from "@/components/common";
+import { ShortcutsPopover } from "./ShortcutsPopover";
+import {
+  Button,
+  Icon,
+  IconButton,
+  Kbd,
+  Segmented,
+  Spinner,
+  Toast,
+} from "@/components/common";
 import { SettingsPanel } from "@/components/Settings/SettingsPanel";
 import { GlossaryList } from "@/components/GlossaryManager/GlossaryList";
 import type { ClipboardItem, ClipboardChangedPayload } from "@/types";
@@ -25,30 +34,15 @@ interface MonitorInfo {
 type DrawerView = "history" | "settings" | "glossary";
 type DrawerMode = "collapsed" | "expanded" | "full";
 
-// Hotkey hint component with custom tooltip
-function HotkeyHint({ 
-  keys, 
-  description, 
-  variant = "default" 
-}: { 
-  keys: string; 
-  description: string; 
-  variant?: "default" | "blue" | "purple";
-}) {
-  const baseClass = "font-mono px-1 rounded cursor-help relative group";
-  const variantClass = {
-    default: "bg-gray-100",
-    blue: "bg-blue-100 text-blue-600",
-    purple: "bg-purple-100 text-purple-600",
-  }[variant];
+/** Gap between notes in the history strip (px). */
+const CARD_GAP = 12;
 
+function ShortcutHint({ keys, label, title }: { keys: string; label: string; title: string }) {
   return (
-    <span className={`${baseClass} ${variantClass}`}>
-      {keys}
-      <span className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 text-[10px] text-white bg-gray-800 rounded shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50">
-        {description}
-        <span className="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-gray-800" />
-      </span>
+    <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap" title={title}>
+      <Kbd>{keys}</Kbd>
+      {/* Labels give way to the keycaps when the window is narrow. */}
+      <span className="hidden lg:inline">{label}</span>
     </span>
   );
 }
@@ -79,6 +73,7 @@ export function DrawerPanel({
   const [searchQuery, setSearchQuery] = useState("");
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [monitors, setMonitors] = useState<MonitorInfo[]>([]);
+  const [toolbarSlot, setToolbarSlot] = useState<HTMLDivElement | null>(null);
   const [currentMonitorInternal, setCurrentMonitorInternal] = useState(savedMonitorIndex ?? 0);
   const setCurrentMonitor = useCallback((index: number) => {
     setCurrentMonitorInternal(index);
@@ -124,7 +119,7 @@ export function DrawerPanel({
     try {
       const result = await invoke<MonitorInfo[]>("get_monitors");
       setMonitors(result);
-      
+
       if (savedMonitorIndex != null && savedMonitorIndex < result.length) {
         setCurrentMonitor(savedMonitorIndex);
       } else {
@@ -182,17 +177,17 @@ export function DrawerPanel({
   // Listen for window resize events and save the width when user manually resizes
   useEffect(() => {
     const appWindow = getCurrentWindow();
-    
+
     const handleResize = async (event: TauriEvent<{ width: number; height: number }>) => {
       // Clear any pending save timeout
       if (resizeTimeoutRef.current) {
         clearTimeout(resizeTimeoutRef.current);
       }
-      
+
       // Get scale factor to convert to logical width
       const scaleFactor = await appWindow.scaleFactor();
       const logicalWidth = Math.round(event.payload.width / scaleFactor);
-      
+
       // Only save if width changed significantly (more than 10px) and not from our own programmatic changes
       const widthDiff = Math.abs(logicalWidth - lastSavedWidthRef.current);
       if (widthDiff > 10) {
@@ -207,9 +202,9 @@ export function DrawerPanel({
         }, 500); // Wait 500ms after resize stops
       }
     };
-    
+
     const unlisten = appWindow.onResized(handleResize);
-    
+
     return () => {
       if (resizeTimeoutRef.current) {
         clearTimeout(resizeTimeoutRef.current);
@@ -265,20 +260,20 @@ export function DrawerPanel({
       // Use e.code instead of e.key because Option+number produces special characters on macOS
       if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
         let monitorIndex = -1;
-        
+
         // Map key codes to monitor indices
         if (e.code === "Digit1" || e.code === "Numpad1") monitorIndex = 0;
         else if (e.code === "Digit2" || e.code === "Numpad2") monitorIndex = 1;
         else if (e.code === "Digit3" || e.code === "Numpad3") monitorIndex = 2;
         else if (e.code === "Digit4" || e.code === "Numpad4") monitorIndex = 3;
         else if (e.code === "Digit5" || e.code === "Numpad5") monitorIndex = 4;
-        
+
         if (monitorIndex >= 0 && monitorIndex < monitors.length) {
           e.preventDefault();
           try {
             await invoke("move_to_monitor", { monitorIndex, anchor: "bottom" });
             setCurrentMonitor(monitorIndex);
-            
+
             // Update lastSavedWidthRef with the new window width after monitor change
             scheduleTimeout(async () => {
               try {
@@ -304,8 +299,7 @@ export function DrawerPanel({
           if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
             e.preventDefault();
             if (scrollRef.current) {
-              // Card width (w-48 = 192px) + gap (gap-4 = 16px) = 208px
-              const scrollAmount = 208;
+              const scrollAmount = POSTIT_CARD_WIDTH + CARD_GAP;
               const direction = e.key === "ArrowLeft" ? -1 : 1;
               scrollRef.current.scrollBy({
                 left: scrollAmount * direction,
@@ -378,7 +372,7 @@ export function DrawerPanel({
     setDrawerMode(mode);
     try {
       await invoke("set_drawer_mode", { mode });
-      
+
       // Update lastSavedWidthRef after mode change (width might have changed)
       scheduleTimeout(async () => {
         try {
@@ -482,7 +476,7 @@ export function DrawerPanel({
     try {
       await invoke("move_to_monitor", { monitorIndex: index, anchor: "bottom" });
       setCurrentMonitor(index);
-      
+
       // Update lastSavedWidthRef with the new window width after monitor change
       scheduleTimeout(async () => {
         try {
@@ -547,280 +541,187 @@ export function DrawerPanel({
   const showBackButton = currentView !== "history";
 
   return (
-    <div className="flex flex-col w-full h-full bg-gradient-to-b from-gray-50/95 to-white/95 backdrop-blur-md rounded-t-2xl border border-gray-200/50 border-b-0 shadow-2xl">
+    <div className="panel">
       {/* Toast */}
       {toast && (
         <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
       )}
 
-      {/* Header - Draggable area */}
-      <div
-        className="flex items-center gap-3 px-4 py-2 cursor-move select-none border-b border-gray-200/50"
-        onMouseDown={handleDragStart}
-      >
-        {/* Back button or Drag handle */}
-        {showBackButton ? (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleBackToHistory();
-            }}
-            className="p-1 rounded-lg hover:bg-gray-200/80 transition-colors"
-            title="뒤로"
-          >
-            <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-        ) : (
-          <div className="flex gap-0.5">
-            <div className="w-1 h-4 bg-gray-300 rounded-full" />
-            <div className="w-1 h-4 bg-gray-300 rounded-full" />
-            <div className="w-1 h-4 bg-gray-300 rounded-full" />
+      <div className="grabber" aria-hidden="true" />
+
+      {/* Toolbar - draggable area */}
+      <header className="toolbar" onMouseDown={handleDragStart}>
+        {showBackButton && (
+          <div className="flex items-center gap-2.5">
+            <IconButton
+              icon="chevron-left"
+              label="뒤로"
+              variant="glass"
+              iconSize={18}
+              onClick={handleBackToHistory}
+            />
+            <h1 className="text-title text-label">
+              {currentView === "settings" ? "설정" : "용어집"}
+            </h1>
           </div>
         )}
 
-        {/* Title or Search */}
-        {currentView === "history" ? (
-          <div className="relative flex-1 max-w-xs">
+        {/* Search (history) */}
+        {currentView === "history" && (
+          <div className="relative w-[260px] shrink">
             <label htmlFor="drawer-history-search" className="sr-only">
               클립보드 히스토리 검색
             </label>
-            <svg
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-              />
-            </svg>
+            <Icon
+              name="search"
+              size={14}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-label-3"
+            />
             <input
               id="drawer-history-search"
               type="text"
               value={searchQuery}
               onChange={(e) => handleSearch(e.target.value)}
               aria-label="클립보드 히스토리 검색"
-              placeholder="검색..."
-              className="w-full pl-8 pr-3 py-1.5 bg-white/80 rounded-lg border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-              onClick={(e) => e.stopPropagation()}
+              placeholder="검색"
+              className="field field-search"
             />
           </div>
-        ) : (
-          <span className="font-medium text-gray-800">
-            {currentView === "settings" ? "설정" : "용어집"}
-          </span>
+        )}
+
+        {/* Glossary controls are portaled into this slot by GlossaryList */}
+        {currentView === "glossary" && (
+          <div ref={setToolbarSlot} className="flex min-w-0 flex-1 items-center gap-2.5" />
         )}
 
         {/* Monitor selector - show only when multiple monitors are connected */}
         {monitors.length > 1 && (
-          <div className="flex items-center gap-1 px-2 py-1 bg-white/80 rounded-lg border border-gray-200">
-            <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-              />
-            </svg>
-            {monitors.map((_, index) => (
-              <button
-                key={index}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleMoveToMonitor(index);
-                }}
-                className={`
-                  w-6 h-6 text-xs font-medium rounded transition-colors
-                  ${currentMonitor === index
-                    ? "bg-blue-500 text-white"
-                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                  }
-                `}
-                title={`모니터 ${index + 1}로 이동 (⌥${index + 1})`}
-              >
-                {index + 1}
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            <Icon name="display" size={15} className="text-label-3" />
+            <Segmented
+              ariaLabel="모니터 선택"
+              value={currentMonitor}
+              options={monitors.map((_, index) => ({
+                value: index,
+                label: String(index + 1),
+                title: `모니터 ${index + 1}로 이동 (⌥${index + 1})`,
+              }))}
+              onChange={handleMoveToMonitor}
+            />
           </div>
         )}
 
-        {/* Spacer */}
-        <div className="flex-1" />
-
-        {/* Accessibility warning icon */}
+        {/* Accessibility warning */}
         {hasAccessibility === false && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
+          <Button
+            size="sm"
+            variant="tinted"
+            tone="orange"
+            icon="warning"
+            title="단축키(⌘CC, ⌘EE)를 쓰려면 접근성 권한이 필요합니다"
+            onClick={() => {
               void invoke("open_accessibility_settings").catch((err) => {
                 console.error("Failed to open accessibility settings:", err);
                 setToast({ message: "접근성 설정을 열 수 없습니다", type: "error" });
               });
             }}
-            className="p-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 transition-colors"
-            title="접근성 권한 필요"
           >
-            <svg className="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-          </button>
+            접근성 권한 필요
+          </Button>
         )}
 
         {/* Hotkey hints - only in history view */}
         {currentView === "history" && (
-          <div className="hidden sm:flex items-center gap-1 text-[10px] text-gray-400">
-            <HotkeyHint keys="⌘CC" description="선택한 텍스트 번역 (Cmd+C 두 번)" />
-            <HotkeyHint keys="⌘EE" description="선택한 텍스트 다듬기 (Cmd+E 두 번)" />
-            <HotkeyHint keys="⌘⌥V" description="클립보드 히스토리 열기" />
-            {isStealthMode && (
-              <>
-                <HotkeyHint keys="1-9" description="N번째 항목 클립보드에 복사" />
-                <HotkeyHint keys="⇧N" description="Shift+숫자: N번째 항목 번역" variant="blue" />
-                <HotkeyHint keys="⌃N" description="Ctrl+숫자: N번째 항목 다듬기" variant="purple" />
-              </>
-            )}
-            <HotkeyHint keys="←→" description="좌우 화살표로 스크롤" />
+          <div className="hidden shrink-0 items-center gap-3 text-caption text-label-3 md:flex">
+            <ShortcutHint keys="⌘CC" label="번역" title="선택한 텍스트 번역 (⌘C 두 번)" />
+            <ShortcutHint keys="⌘EE" label="다듬기" title="선택한 텍스트 다듬기 (⌘E 두 번)" />
+            <ShortcutHint keys="⌘⌥V" label="히스토리" title="클립보드 히스토리 열기" />
           </div>
         )}
 
-        {/* Item count - only in history view */}
-        {currentView === "history" && (
-          <span className="text-xs text-gray-500 tabular-nums">
-            {items.length}개
-          </span>
-        )}
+        <div className="ml-auto flex shrink-0 items-center gap-2.5">
+          {currentView === "history" && (
+            <>
+              <ShortcutsPopover />
 
-        {/* Glossary button - only in history view */}
-        {currentView === "history" && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleOpenGlossary();
-            }}
-            className="p-1.5 rounded-lg hover:bg-gray-200/80 transition-colors"
-            title="용어집"
-          >
-            <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-            </svg>
-          </button>
-        )}
+              {/* Item count */}
+              <span className="min-w-[2.5em] text-right text-caption tabular-nums text-label-3">
+                {items.length}개
+              </span>
 
-        {/* Settings button - only in history view */}
-        {currentView === "history" && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleOpenSettings();
-            }}
-            className="p-1.5 rounded-lg hover:bg-gray-200/80 transition-colors"
-            title="설정"
-          >
-            <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </button>
-        )}
+              <div className="cluster">
+                <IconButton icon="book" label="용어집" onClick={handleOpenGlossary} />
+                <IconButton icon="gear" label="설정" onClick={handleOpenSettings} />
+              </div>
+            </>
+          )}
 
-        {/* Collapse button - only show when not in stealth mode */}
-        {!isStealthMode && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleToggleCollapse();
-            }}
-            className="p-1.5 rounded-lg hover:bg-gray-200/80 transition-colors"
-            title={isCollapsed ? "펼치기" : "접기"}
-          >
-            <svg
-              className={`w-4 h-4 text-gray-500 transition-transform duration-200 ${
-                isCollapsed ? "rotate-180" : ""
-              }`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+          {/* Collapse button - only show when not in stealth mode */}
+          {!isStealthMode && (
+            <button
+              type="button"
+              onClick={handleToggleCollapse}
+              className="icon-btn icon-btn-glass"
+              aria-label={isCollapsed ? "펼치기" : "접기"}
+              title={isCollapsed ? "펼치기" : "접기"}
             >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-        )}
+              <Icon
+                name="chevron-down"
+                size={16}
+                className={`transition-transform duration-200 ${isCollapsed ? "rotate-180" : ""}`}
+              />
+            </button>
+          )}
 
-        {/* Close button - only show in stealth mode */}
-        {isStealthMode && onClose && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onClose();
-            }}
-            className="p-1.5 rounded-lg hover:bg-gray-200/80 transition-colors"
-            title="닫기 (ESC)"
-          >
-            <svg
-              className="w-4 h-4 text-gray-500"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        )}
-      </div>
+          {/* Close button - only show in stealth mode */}
+          {isStealthMode && onClose && (
+            <IconButton
+              icon="xmark"
+              label="닫기 (ESC)"
+              variant="glass"
+              onClick={onClose}
+            />
+          )}
+        </div>
+      </header>
 
       {/* Content */}
       {!isCollapsed && (
-        <div className="flex-1 overflow-hidden">
+        <div key={currentView} className="animate-fade-in min-h-0 flex-1 overflow-hidden">
           {currentView === "history" && (
             <div className="relative h-full">
-              <p
-                id="history-scroll-hint"
-                className="pointer-events-none absolute top-2 right-4 z-10 rounded-full border border-gray-200 bg-white/85 px-2 py-0.5 text-[10px] text-gray-500 shadow-sm"
-              >
+              <p id="history-scroll-hint" className="sr-only">
                 좌우로 스크롤
               </p>
               <div
                 ref={scrollRef}
                 onWheel={handleWheel}
                 aria-describedby="history-scroll-hint"
-                className="h-full flex items-start gap-4 px-4 py-3 overflow-x-auto overflow-y-hidden scroll-smooth"
-                style={{
-                  scrollbarWidth: "thin",
-                  scrollbarColor: "rgba(156, 163, 175, 0.5) transparent",
-                }}
+                className="scroll-fade-x flex h-full scroll-smooth overflow-x-auto overflow-y-hidden px-4 py-4"
+                style={{ gap: CARD_GAP }}
               >
                 {/* Create new post-it card - always shown first */}
                 <CreatePostItCard onClick={handleCreateNewItem} />
 
                 {isLoading && items.length === 0 ? (
-                  <div className="flex items-center justify-center w-full py-8" role="status" aria-live="polite">
-                    <div className="flex items-center gap-2 text-sm text-blue-600">
-                      <div className="animate-spin w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full" />
-                      <span>히스토리를 불러오는 중...</span>
-                    </div>
+                  <div
+                    className="flex flex-1 items-center justify-center gap-2 text-body text-label-3"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <Spinner size={16} />
+                    <span>히스토리를 불러오는 중…</span>
                   </div>
                 ) : items.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center flex-1 py-8 text-center">
-                    <svg
-                      className="w-12 h-12 text-gray-300"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={1.5}
-                        d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
-                      />
-                    </svg>
-                    <p className="mt-2 text-sm text-gray-500">
+                  <div className="flex min-w-0 flex-1 flex-col items-center justify-center text-center">
+                    <Icon name="clipboard" size={30} strokeWidth={1.3} className="text-label-3" />
+                    <p className="mt-2.5 text-body font-medium text-label-2">
                       {searchQuery ? "검색 결과가 없습니다" : "새 메모를 만들어보세요"}
+                    </p>
+                    <p className="mt-0.5 text-sub text-label-3">
+                      {searchQuery
+                        ? "다른 검색어를 입력해 보세요."
+                        : "복사한 텍스트는 자동으로 이곳에 쌓입니다."}
                     </p>
                   </div>
                 ) : (
@@ -845,19 +746,18 @@ export function DrawerPanel({
           )}
 
           {currentView === "settings" && (
-            <div className="h-full overflow-y-auto">
+            <div className="h-full">
               <SettingsPanel />
             </div>
           )}
 
           {currentView === "glossary" && (
-            <div className="h-full overflow-y-auto">
-              <GlossaryList />
+            <div className="h-full">
+              <GlossaryList toolbarSlot={toolbarSlot} />
             </div>
           )}
         </div>
       )}
-
     </div>
   );
 }

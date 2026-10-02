@@ -374,7 +374,7 @@ function App() {
   if (popupMode === "translate" && sourceText) {
     return (
       <div className="h-screen w-full overflow-hidden bg-transparent">
-        <div className="h-full flex flex-col bg-gradient-to-b from-gray-50/95 to-white/95 backdrop-blur-md rounded-t-2xl border border-gray-200/50 border-b-0 shadow-2xl">
+        <div className="panel">
           <TranslationPopup
             sourceText={sourceText}
             onClose={handleClosePopup}
@@ -388,7 +388,7 @@ function App() {
   if (popupMode === "polish" && sourceText) {
     return (
       <div className="h-screen w-full overflow-hidden bg-transparent">
-        <div className="h-full flex flex-col bg-gradient-to-b from-gray-50/95 to-white/95 backdrop-blur-md rounded-t-2xl border border-gray-200/50 border-b-0 shadow-2xl">
+        <div className="panel">
           <PolishPopup
             sourceText={sourceText}
             onClose={handleClosePopup}

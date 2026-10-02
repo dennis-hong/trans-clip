@@ -1,65 +1,71 @@
-import React from "react";
+import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { Icon, type IconName } from "./Icon";
+import { Spinner } from "./Spinner";
 
-interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: "primary" | "secondary" | "ghost";
+export type Tone = "accent" | "purple" | "green" | "red" | "orange" | "yellow";
+
+// Full class names on purpose: Tailwind only keeps classes it can find as literals.
+export const TONE_CLASS: Record<Tone, string> = {
+  accent: "tone-accent",
+  purple: "tone-purple",
+  green: "tone-green",
+  red: "tone-red",
+  orange: "tone-orange",
+  yellow: "tone-yellow",
+};
+
+interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  /** primary = filled accent, tinted = soft accent, secondary = glass, plain = text only */
+  variant?: "primary" | "secondary" | "tinted" | "plain" | "ghost";
+  tone?: Tone;
   size?: "sm" | "md" | "lg";
   loading?: boolean;
-  children: React.ReactNode;
+  icon?: IconName;
+  children?: ReactNode;
 }
 
+const VARIANT_CLASS = {
+  primary: "btn-primary",
+  secondary: "",
+  tinted: "btn-tinted",
+  plain: "btn-plain",
+  ghost: "btn-plain",
+} as const;
+
+const SIZE_CLASS = {
+  sm: "btn-sm",
+  md: "",
+  lg: "btn-lg",
+} as const;
+
 export function Button({
-  variant = "primary",
+  variant = "secondary",
+  tone = "accent",
   size = "md",
   loading = false,
+  icon,
   disabled,
   children,
   className = "",
+  type = "button",
   ...props
 }: ButtonProps) {
-  const baseStyles =
-    "inline-flex items-center justify-center font-medium rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed";
-
-  const variants = {
-    primary: "bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500",
-    secondary:
-      "bg-gray-200 text-gray-900 hover:bg-gray-300 focus:ring-gray-500 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600",
-    ghost:
-      "bg-transparent text-gray-700 hover:bg-gray-100 focus:ring-gray-500 dark:text-gray-300 dark:hover:bg-gray-800",
-  };
-
-  const sizes = {
-    sm: "px-2.5 py-1.5 text-xs",
-    md: "px-4 py-2 text-sm",
-    lg: "px-6 py-3 text-base",
-  };
+  const classes = [
+    "btn",
+    SIZE_CLASS[size],
+    VARIANT_CLASS[variant],
+    TONE_CLASS[tone],
+    className,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <button
-      className={`${baseStyles} ${variants[variant]} ${sizes[size]} ${className}`}
-      disabled={disabled || loading}
-      {...props}
-    >
-      {loading && (
-        <svg
-          className="animate-spin -ml-1 mr-2 h-4 w-4"
-          xmlns="http://www.w3.org/2000/svg"
-          fill="none"
-          viewBox="0 0 24 24"
-        >
-          <circle
-            className="opacity-25"
-            cx="12"
-            cy="12"
-            r="10"
-            stroke="currentColor"
-            strokeWidth="4"
-          />
-          <path
-            className="opacity-75"
-            fill="currentColor"
-            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-          />
-        </svg>
+    <button type={type} className={classes} disabled={disabled || loading} {...props}>
+      {loading ? (
+        <Spinner size={size === "sm" ? 12 : 14} />
+      ) : (
+        icon && <Icon name={icon} size={size === "sm" ? 13 : 15} />
       )}
       {children}
     </button>

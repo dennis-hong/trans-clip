@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Icon } from "./Icon";
 
 export interface ToastProps {
   message: string;
@@ -6,6 +7,12 @@ export interface ToastProps {
   duration?: number;
   onClose: () => void;
 }
+
+const ICON = {
+  success: { name: "check-circle-fill", color: "text-green" },
+  error: { name: "xmark-circle-fill", color: "text-red" },
+  info: { name: "info-circle-fill", color: "text-accent" },
+} as const;
 
 export function Toast({ message, type = "success", duration = 2000, onClose }: ToastProps) {
   const [isVisible, setIsVisible] = useState(false);
@@ -22,45 +29,18 @@ export function Toast({ message, type = "success", duration = 2000, onClose }: T
     return () => clearTimeout(timer);
   }, [duration, onClose]);
 
-  const bgColor = {
-    success: "bg-green-500",
-    error: "bg-red-500",
-    info: "bg-blue-500",
-  }[type];
-
-  const icon = {
-    success: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-      </svg>
-    ),
-    error: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-      </svg>
-    ),
-    info: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-    ),
-  }[type];
+  const icon = ICON[type];
 
   return (
     <div
       role="status"
       aria-live="polite"
       aria-atomic="true"
-      className={`
-        fixed bottom-4 left-1/2 -translate-x-1/2 z-50
-        flex items-center gap-2 px-4 py-2 rounded-lg shadow-lg
-        text-white text-sm font-medium
-        transition-all duration-200 ease-out
-        ${bgColor}
-        ${isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"}
-      `}
+      className={`popover pointer-events-none fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full py-2 pl-3 pr-4 text-body font-medium text-label transition-all duration-200 ease-out ${
+        isVisible ? "translate-y-0 scale-100 opacity-100" : "translate-y-2 scale-95 opacity-0"
+      }`}
     >
-      {icon}
+      <Icon name={icon.name} size={18} className={icon.color} />
       <span>{message}</span>
     </div>
   );

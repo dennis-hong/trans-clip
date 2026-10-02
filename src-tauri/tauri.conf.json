@@ -22,6 +22,11 @@
         "skipTaskbar": false,
         "decorations": false,
         "transparent": true,
+        "windowEffects": {
+          "effects": ["popover"],
+          "state": "active",
+          "radius": 20
+        },
         "alwaysOnTop": true,
         "resizable": true,
         "minWidth": 400,
