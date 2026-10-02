@@ -34,6 +34,10 @@ export function PostItEditorWindow() {
     params.mode === "edit" && Boolean(params.itemId)
   );
   const [isSaving, setIsSaving] = useState(false);
+  // Bumped on every "open" request. The load effect depends on it so the memo is
+  // reloaded even when the editor is asked for what it already shows (same mode + itemId);
+  // otherwise the blanked content and loading state would never be refilled.
+  const [openRequest, setOpenRequest] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const closeEditorWindow = useCallback(async () => {
@@ -58,6 +62,7 @@ export function PostItEditorWindow() {
     const unlisten = listen<EditorParams>("postit_editor_open", (event) => {
       const nextParams = normalizeEditorParams(event.payload);
       setParams(nextParams);
+      setOpenRequest((request) => request + 1);
       setContent("");
       setIsSaving(false);
       setIsLoadingItem(nextParams.mode === "edit" && Boolean(nextParams.itemId));
@@ -98,7 +103,7 @@ export function PostItEditorWindow() {
     return () => {
       cancelled = true;
     };
-  }, [params.itemId, params.mode]);
+  }, [params.itemId, params.mode, openRequest]);
 
   // Focus textarea on mount
   useEffect(() => {
