@@ -42,11 +42,27 @@ cat ~/.tauri/transclip.key.pub
 출력된 값을 `src-tauri/tauri.conf.json`의 `plugins.updater.pubkey`에 설정합니다.
 `REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY` 상태면 워크플로가 실패합니다.
 
+### 코드 서명 ID 생성 (최초 1회, 이후 영구 불변)
+
+macOS는 접근성·키체인 권한을 앱의 코드 서명 요구사항(designated requirement)으로 기억합니다. ad-hoc 서명은 이 값이 바이너리 해시라서 **버전마다 달라지고**, 그래서 업데이트할 때마다 권한이 초기화됐습니다. 모든 릴리즈를 **같은 자체 서명 인증서**로 서명하면 요구사항이 `identifier "com.transclip" and certificate root = H"<인증서 SHA-1>"`로 고정되어 권한이 유지됩니다.
+
+```bash
+./scripts/codesign.sh setup
+```
+
+- `~/.tauri/transclip-codesign.p12`(개인키+인증서)와 `~/.tauri/transclip-codesign.p12.pass`(비밀번호)를 만들고, 공개 핀 `.github/codesign-cert.sha1`을 생성합니다. **핀 파일은 커밋합니다.**
+- p12와 비밀번호는 **반드시 백업**합니다(비밀번호 관리자 등). 잃어버리면 같은 ID를 복구할 수 없고 모든 사용자가 접근성을 다시 허용해야 합니다.
+- **첫 서명 릴리즈 이후에는 번들 ID(`com.transclip`)와 이 인증서를 절대 바꾸지 마세요.** 이미 존재하면 스크립트가 덮어쓰기를 거부합니다(`--force`는 첫 서명 릴리즈 전에만).
+- Apple이 발급한 인증서가 아니므로 Gatekeeper 동작은 그대로입니다(최초 설치 시 `xattr -cr` 필요). 인앱 업데이트는 격리 속성이 붙지 않아 영향이 없습니다.
+- 로컬에서는 이 인증서를 신뢰 등록하지 않으면 `codesign`이 거부합니다(`no identity found`). 그래서 서명은 CI 러너(임시 환경)에서만 수행합니다.
+
 ### GitHub Secrets 등록
 
 ```bash
 gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/transclip.key
 gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD < ~/.tauri/transclip.key.pass
+base64 < ~/.tauri/transclip-codesign.p12 | tr -d '\n' | gh secret set CODESIGN_P12_BASE64
+gh secret set CODESIGN_P12_PASSWORD < ~/.tauri/transclip-codesign.p12.pass
 ```
 
 > **주의**: `echo` 나 `--body ""`로 시크릿을 설정하면 줄바꿈이 포함되어 비밀번호 불일치가 발생합니다. 반드시 `< 파일` 또는 `printf` 파이프를 사용하세요.
@@ -57,11 +73,23 @@ gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD < ~/.tauri/transclip.key.pass
 gh secret list
 ```
 
-`TAURI_SIGNING_PRIVATE_KEY`와 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 두 개가 보여야 합니다.
+`TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `CODESIGN_P12_BASE64`, `CODESIGN_P12_PASSWORD` 네 개가 보여야 합니다.
 
 ### 워크플로 파일 확인
 
 `.github/workflows/release.yml`이 기본 브랜치에 반영되어 있어야 합니다.
+`.github/codesign-cert.sha1`(서명 인증서 핀)도 함께 커밋되어 있어야 합니다.
+
+### 서명 드라이런 (시크릿·인증서를 바꾼 직후 권장)
+
+`workflow_dispatch`로 릴리즈 없이 빌드·서명·검증만 수행합니다. 태그를 푸시하기 전에 서명 파이프라인이 동작하는지 확인할 수 있습니다.
+
+```bash
+gh workflow run release.yml          # 기본 브랜치에 워크플로가 반영되어 있어야 합니다
+gh run list --workflow release --limit 1
+```
+
+"Verify code signing identity" 단계가 통과하고 "Create GitHub release" 단계가 건너뛰어지면 정상입니다.
 
 ## 실행 단계
 
@@ -96,8 +124,9 @@ git status --short
 태그 푸시 전에 반드시 아래를 확인합니다.
 
 ```bash
-# 1. 서명 키 존재 확인
+# 1. 서명 키 존재 확인 (업데이터 키 + 코드 서명 ID + 인증서 핀)
 ls ~/.tauri/transclip.key ~/.tauri/transclip.key.pub ~/.tauri/transclip.key.pass
+ls ~/.tauri/transclip-codesign.p12 ~/.tauri/transclip-codesign.p12.pass .github/codesign-cert.sha1
 
 # 2. GitHub 활성 계정 확인 (중요!)
 gh auth status
@@ -106,7 +135,7 @@ gh auth status
 #   gh auth switch --user dennis-hong
 
 # 3. GitHub Secrets 설정 확인
-gh secret list  # TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD 존재 필수
+gh secret list  # TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD, CODESIGN_P12_BASE64, CODESIGN_P12_PASSWORD 존재 필수
 # 주의: gh secret list가 403 권한 오류를 반환하면 활성 계정이 잘못된 것입니다.
 # 계정을 전환한 뒤 다시 시도합니다.
 # 계정 전환 후에도 실패하면, 이전 릴리즈가 성공했다면 Secret은 설정되어 있는 것으로 간주해도 됩니다.
@@ -187,7 +216,7 @@ gh run view <run-id> --json status,conclusion --jq '"\(.status) \(.conclusion)"'
 
 > **주의**: `gh run watch`는 출력이 과도하고 장시간 대기합니다. 위 폴링 방식을 권장합니다.
 
-> **참고**: CI에 "Verify Developer ID code signing" 단계에서 경고(warning)가 나올 수 있습니다. 이는 Apple Developer ID 인증서 없이 빌드된 경우이며, 현재로서는 경고만 출력하고 릴리즈를 중단하지 않습니다. 장기적으로 Apple 서명/노타라이즈를 구성하면 업데이트 시 접근성·키체인 재요청 문제가 근본적으로 해결됩니다.
+> **참고**: CI의 "Verify code signing identity" 단계는 앱과 업데이트 아카이브(`TransClip.app.tar.gz`)가 고정 서명 ID의 요구사항(`.github/codesign-cert.sha1`)과 일치하는지 검사하며, **불일치하면 릴리즈를 중단**합니다. 서명 ID가 바뀌면 모든 사용자의 접근성·키체인 권한이 초기화되므로, 의도한 경우가 아니면 인증서와 번들 ID(`com.transclip`)를 바꾸지 마세요.
 
 ### 9) 릴리즈 자산 확인
 
@@ -218,6 +247,14 @@ git log <prev-tag>..vX.X.X --oneline --no-merges
 ```
 
 `chore:` 커밋(버전 범프 등)은 릴리즈 노트에서 제외합니다.
+
+> **고정 서명 ID를 처음 적용하는 릴리즈**의 노트에는 아래 안내를 "4. 권한 설정" 앞에 반드시 넣습니다. 이전 빌드(ad-hoc 서명)의 접근성 권한이 새 서명에는 적용되지 않기 때문입니다. 키체인 접근 허용 창도 한 번 나타날 수 있습니다("항상 허용").
+>
+> ```
+> > ⚠️ **이 버전으로 업데이트한 직후 1회**: 서명 방식이 바뀌어 접근성 권한을 한 번 다시 허용해야 합니다.
+> > 시스템 설정 > 개인 정보 보호 및 보안 > 접근성에서 TransClip을 **−** 버튼으로 삭제한 뒤 다시 추가하고 앱을 재시작하세요.
+> > 이후 업데이트부터는 권한이 유지됩니다.
+> ```
 
 커밋 유형에 따라 아래 카테고리로 분류합니다:
 - `feat:` → "새로운 기능"
@@ -306,6 +343,11 @@ gh run view --log-failed --job=<job-id> 2>&1 | tail -30
 | `Updater public key is not configured` | pubkey 플레이스홀더 상태 | `tauri.conf.json` pubkey 업데이트 |
 | `incorrect updater private key password` | 비밀번호 불일치 | 키 재생성 후 Secret/pubkey 재동기화 |
 | `Wrong password for that key` | 빈 비밀번호로 키 생성 후 빈 문자열이 아닌 값이 Secret에 등록됨 | 키 재생성 (명시적 비밀번호 사용) |
+| `CODESIGN_P12_BASE64 / CODESIGN_P12_PASSWORD secrets are not set` | 코드 서명 시크릿 미등록 | "코드 서명 ID 생성" 후 "GitHub Secrets 등록" |
+| `.github/codesign-cert.sha1 is missing` | 인증서 핀 파일 미커밋 | `./scripts/codesign.sh setup` 실행 후 핀 파일 커밋 |
+| `the imported certificate does not match the pin` | 시크릿의 p12가 핀과 다른 인증서 | 올바른 p12를 다시 등록 (첫 서명 릴리즈 전이라면 핀을 새 인증서로 갱신) |
+| `The signing identity is not valid for code signing` | 러너에서 인증서 신뢰 등록 실패 | 로그의 `add-trusted-cert` 단계와 `find-identity` 출력 확인 |
+| `designated requirement mismatch` | 번들 ID 또는 서명 인증서가 핀과 다름 | 릴리즈 중단. 서명 ID/번들 ID를 원복 (바꾸면 전 사용자 권한 초기화) |
 | `HTTP 404: Not Found` (gh release edit) | gh auth 활성 계정이 리포지토리 소유자가 아님 | `gh auth switch --user dennis-hong` |
 | `HTTP 403` (gh secret list) | gh auth 활성 계정 권한 부족 | `gh auth switch --user dennis-hong` |
 

@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - "v*"
+  # Dry run: builds, signs and verifies exactly like a release, but publishes nothing.
+  # Use it after touching the signing secrets:  gh workflow run release.yml
+  workflow_dispatch:
 
 jobs:
   release-macos-aarch64:
@@ -52,35 +55,76 @@ jobs:
             exit 1
           fi
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build signed updater artifacts
-        run: pnpm tauri build --target aarch64-apple-darwin
-
-      - name: Verify Developer ID code signing
+      - name: Validate code signing inputs
+        env:
+          CODESIGN_P12_BASE64: ${{ secrets.CODESIGN_P12_BASE64 }}
+          CODESIGN_P12_PASSWORD: ${{ secrets.CODESIGN_P12_PASSWORD }}
         shell: bash
         run: |
           set -euo pipefail
-
-          APP_DIR="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/TransClip.app"
-          if [ ! -d "${APP_DIR}" ]; then
-            echo "::warning::Missing app bundle: ${APP_DIR}"
-            exit 0
+          if [ -z "${CODESIGN_P12_BASE64:-}" ] || [ -z "${CODESIGN_P12_PASSWORD:-}" ]; then
+            echo "::error::CODESIGN_P12_BASE64 / CODESIGN_P12_PASSWORD secrets are not set."
+            echo "::error::Run 'scripts/codesign.sh setup' once and register the secrets (see .claude/commands/release.md)."
+            exit 1
+          fi
+          if [ ! -s .github/codesign-cert.sha1 ]; then
+            echo "::error::.github/codesign-cert.sha1 is missing. 'scripts/codesign.sh setup' creates it; commit it."
+            exit 1
           fi
 
-          SIGN_INFO="$(codesign -dv --verbose=4 "${APP_DIR}" 2>&1 || true)"
-          echo "${SIGN_INFO}"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
-          if ! printf "%s" "${SIGN_INFO}" | grep -q "Authority=Developer ID Application"; then
-            echo "::warning::Release build is NOT signed with a Developer ID Application certificate."
-            echo "::warning::Unsigned/ad-hoc updates may trigger repeated Accessibility and Keychain prompts."
-            echo "::warning::Configure Apple code signing in CI to eliminate this issue."
-          else
-            echo "Developer ID code signing verified."
+      # macOS remembers Accessibility / Keychain grants by the app's code-signing requirement.
+      # Every release is signed with the same self-signed identity so that requirement never
+      # changes and users keep their permissions across updates. See scripts/codesign.sh.
+      - name: Import code signing identity
+        env:
+          CODESIGN_P12_BASE64: ${{ secrets.CODESIGN_P12_BASE64 }}
+          CODESIGN_P12_PASSWORD: ${{ secrets.CODESIGN_P12_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEYCHAIN="${RUNNER_TEMP}/transclip-signing.keychain-db"
+          PEM="${RUNNER_TEMP}/transclip-signing.pem"
+          SHA1="$(tr -d '[:space:]' < .github/codesign-cert.sha1)"
+
+          CODESIGN_KEYCHAIN_PATH="${KEYCHAIN}" ./scripts/codesign.sh import
+
+          # Make the temporary keychain visible to codesign.
+          security list-keychains -d user -s "${KEYCHAIN}" $(security list-keychains -d user | tr -d '"')
+
+          # codesign refuses identities that are not trusted for code signing. The runner is
+          # ephemeral, so trusting the certificate here affects this job only. End-user machines
+          # never need to trust it: macOS permissions only compare the requirement string.
+          if ! sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain "${PEM}"; then
+            echo "::warning::Admin-domain trust failed; falling back to the user domain."
+            security add-trusted-cert -r trustRoot -p codeSign -k "${KEYCHAIN}" "${PEM}"
           fi
+
+          VALID="$(security find-identity -v -p codesigning "${KEYCHAIN}")"
+          echo "${VALID}"
+          if ! printf '%s' "${VALID}" | grep -qi "${SHA1}"; then
+            echo "::error::The signing identity is not valid for code signing (trust step failed)."
+            security find-identity -p codesigning "${KEYCHAIN}" || true
+            exit 1
+          fi
+
+      - name: Build signed app and updater artifacts
+        run: pnpm tauri build --target aarch64-apple-darwin
+
+      # Hard gate: a build that does not carry the pinned requirement would reset every user's
+      # Accessibility / Keychain grants, so it must never be published.
+      - name: Verify code signing identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUNDLE_DIR="src-tauri/target/aarch64-apple-darwin/release/bundle/macos"
+          ./scripts/codesign.sh verify "${BUNDLE_DIR}/TransClip.app"
+          ./scripts/codesign.sh verify "${BUNDLE_DIR}/TransClip.app.tar.gz"
 
       - name: Prepare release assets
+        if: startsWith(github.ref, 'refs/tags/v')
         id: prep
         shell: bash
         run: |
@@ -137,6 +181,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.prep.outputs.tag }}
@@ -146,3 +191,14 @@ jobs:
             ${{ steps.prep.outputs.updater_sig }}
             ${{ steps.prep.outputs.latest_json }}
             ${{ steps.prep.outputs.manual_zip }}
+
+      - name: Remove signing identity
+        if: always()
+        shell: bash
+        run: |
+          if [ -n "${CODESIGN_KEYCHAIN_PATH:-}" ]; then
+            security delete-keychain "${CODESIGN_KEYCHAIN_PATH}" || true
+          fi
+          if [ -f "${RUNNER_TEMP}/transclip-signing.pem" ]; then
+            sudo security remove-trusted-cert -d "${RUNNER_TEMP}/transclip-signing.pem" || true
+          fi

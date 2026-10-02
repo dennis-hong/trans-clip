@@ -28,6 +28,13 @@ src-tauri/target/
 .DS_Store
 Thumbs.db
 
+# Code signing material (never commit; see scripts/codesign.sh)
+*.p12
+*.pfx
+*.pem
+*.key
+*.pass
+
 # Environment
 .env
 .env.local

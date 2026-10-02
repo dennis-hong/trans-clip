@@ -74,6 +74,8 @@ App.tsx manages a `popupMode` state (`"none" | "translate" | "polish" | "history
 - API keys stored in macOS Keychain via Security framework FFI
 - Window: transparent, no decorations, always-on-top
 - Requires Accessibility permission for hotkey interception
+- Releases are signed with one fixed self-signed identity (`scripts/codesign.sh`, pinned in `.github/codesign-cert.sha1`). macOS keys Accessibility/Keychain grants to the bundle ID `com.transclip` plus that certificate, so **never change either** — every user would have to re-grant permissions. CI fails a release whose designated requirement differs from the pin.
+- `hardenedRuntime` is off on purpose: hotkey/paste code shells out to `osascript` (Apple Events), which hardened runtime blocks without extra entitlements.
 
 ### UI Design System (macOS "glass")
 
