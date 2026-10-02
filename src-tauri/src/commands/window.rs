@@ -16,6 +16,12 @@ static LAST_MONITOR_INDEX: AtomicUsize = AtomicUsize::new(0);
 static LAST_MONITOR_STATE: LazyLock<Mutex<Option<LastMonitorState>>> =
     LazyLock::new(|| Mutex::new(None));
 const POSTIT_EDITOR_LABEL: &str = "postit-editor";
+/// Logical size of the memo editor window.
+const POSTIT_EDITOR_WIDTH: i32 = 500;
+const POSTIT_EDITOR_HEIGHT: i32 = 400;
+/// Logical gap kept between the editor and the top/side edges of its monitor
+/// (the top also has to clear the menu bar).
+const POSTIT_EDITOR_EDGE_MARGIN: i32 = 40;
 
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1011,6 +1017,46 @@ pub async fn set_drawer_mode(
 
 #[cfg(test)]
 mod tests {
+    use crate::utils::monitor::MonitorLogicalBounds;
+
+    #[test]
+    fn editor_origin_is_centered_and_on_screen() {
+        let bounds = MonitorLogicalBounds {
+            x: 0,
+            y: 0,
+            width: 1512,
+            height: 982,
+        };
+        let (x, y) = super::centered_editor_origin(&bounds, (500, 400));
+        assert_eq!(x, 506);
+        assert!(y >= 40 && y + 400 <= 982 - 12);
+    }
+
+    #[test]
+    fn editor_origin_follows_secondary_monitor_offset() {
+        let bounds = MonitorLogicalBounds {
+            x: 1512,
+            y: -200,
+            width: 1920,
+            height: 1080,
+        };
+        let (x, y) = super::centered_editor_origin(&bounds, (500, 400));
+        assert_eq!(x, 1512 + 710);
+        assert!(y >= bounds.y && y + 400 <= bounds.y + bounds.height);
+    }
+
+    #[test]
+    fn editor_origin_is_clamped_on_tiny_monitor() {
+        let bounds = MonitorLogicalBounds {
+            x: 0,
+            y: 0,
+            width: 520,
+            height: 420,
+        };
+        let (x, y) = super::centered_editor_origin(&bounds, (500, 400));
+        assert!(x >= 0 && x + 500 <= 520);
+        assert!(y >= 0 && y + 400 <= 420);
+    }
     use super::{resolve_saved_monitor_index, LastMonitorState, MonitorSelectionCandidate};
 
     #[test]
@@ -1128,6 +1174,70 @@ mod tests {
     }
 }
 
+/// Logical top-left of a window of `size` that is centered horizontally on
+/// `bounds` and sits slightly above its vertical center (where the eye lands),
+/// clamped so it never leaves the monitor.
+fn centered_editor_origin(
+    bounds: &crate::utils::monitor::MonitorLogicalBounds,
+    size: (i32, i32),
+) -> (i32, i32) {
+    let (width, height) = size;
+    let x = bounds.x + (bounds.width - width) / 2;
+    let y = bounds.y + (bounds.height - height) / 3;
+
+    (
+        clamp_with_margin(
+            x,
+            bounds.x,
+            bounds.x + bounds.width - width,
+            POSTIT_EDITOR_EDGE_MARGIN,
+            POSTIT_EDITOR_EDGE_MARGIN,
+        ),
+        clamp_with_margin(
+            y,
+            bounds.y,
+            bounds.y + bounds.height - height,
+            POSTIT_EDITOR_EDGE_MARGIN,
+            WINDOW_BOTTOM_MARGIN,
+        ),
+    )
+}
+
+/// Clamp `pos` into `[min, max]` keeping `lo`/`hi` of slack to each end. When the
+/// range is too tight for those margins, fall back to just fitting in `[min, max]`.
+fn clamp_with_margin(pos: i32, min: i32, max: i32, lo: i32, hi: i32) -> i32 {
+    let max = max.max(min);
+    if min + lo <= max - hi {
+        pos.clamp(min + lo, max - hi)
+    } else {
+        pos.clamp(min, max)
+    }
+}
+
+/// Logical position for the memo editor on the monitor holding the main window.
+fn postit_editor_position(app: &tauri::AppHandle) -> Option<(i32, i32)> {
+    let main_win = app.get_webview_window("main")?;
+    let monitor = main_win
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| app.primary_monitor().ok().flatten())?;
+    let bounds = get_logical_bounds(&monitor);
+    let (x, y) = centered_editor_origin(&bounds, (POSTIT_EDITOR_WIDTH, POSTIT_EDITOR_HEIGHT));
+
+    log::info!(
+        "Positioning editor at ({}, {}) on monitor at ({}, {}) {}x{}",
+        x,
+        y,
+        bounds.x,
+        bounds.y,
+        bounds.width,
+        bounds.height
+    );
+
+    Some((x, y))
+}
+
 #[tauri::command]
 pub async fn open_postit_editor(
     app: tauri::AppHandle,
@@ -1157,46 +1267,18 @@ pub async fn open_postit_editor(
 
     log::info!("Opening PostIt editor window: {}", url);
 
-    // Get main window position to determine which monitor to use
-    let main_window = app.get_webview_window("main");
-    let (editor_x, editor_y) = if let Some(main_win) = main_window {
-        if let (Ok(main_pos), Ok(main_size), Ok(scale)) = (
-            main_win.outer_position(),
-            main_win.outer_size(),
-            main_win.scale_factor(),
-        ) {
-            // Calculate center of main window
-            let main_center_x = main_pos.x as f64 + (main_size.width as f64 / 2.0);
-            let main_center_y = main_pos.y as f64 + (main_size.height as f64 / 2.0);
-
-            // Editor window size (in physical pixels)
-            let editor_width = 500.0 * scale;
-            let editor_height = 400.0 * scale;
-
-            // Position editor centered on main window's center
-            let editor_x = (main_center_x - editor_width / 2.0) as i32;
-            let editor_y = (main_center_y - editor_height / 2.0) as i32;
-
-            log::info!(
-                "Positioning editor at ({}, {}) based on main window at ({}, {})",
-                editor_x,
-                editor_y,
-                main_pos.x,
-                main_pos.y
-            );
-
-            (Some(editor_x), Some(editor_y))
-        } else {
-            (None, None)
-        }
-    } else {
-        (None, None)
-    };
+    // Open on the monitor the main panel is on, in a comfortable spot for writing.
+    let (editor_x, editor_y) = postit_editor_position(&app)
+        .map(|(x, y)| (Some(x), Some(y)))
+        .unwrap_or((None, None));
 
     if let Some(window) = app.get_webview_window(POSTIT_EDITOR_LABEL) {
         if let (Some(x), Some(y)) = (editor_x, editor_y) {
             window
-                .set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }))
+                .set_position(tauri::Position::Logical(tauri::LogicalPosition {
+                    x: x as f64,
+                    y: y as f64,
+                }))
                 .map_err(|e| format!("Failed to position existing editor window: {}", e))?;
         } else {
             window
@@ -1221,7 +1303,7 @@ pub async fn open_postit_editor(
     let mut builder =
         WebviewWindowBuilder::new(&app, POSTIT_EDITOR_LABEL, WebviewUrl::App(url.into()))
             .title("메모 편집")
-            .inner_size(500.0, 400.0)
+            .inner_size(POSTIT_EDITOR_WIDTH as f64, POSTIT_EDITOR_HEIGHT as f64)
             .min_inner_size(400.0, 300.0)
             .decorations(true)
             .always_on_top(true);
