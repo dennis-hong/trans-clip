@@ -4,7 +4,7 @@ use crate::ai::{
 };
 use crate::database::UserSettingsRow;
 use crate::keychain;
-use crate::prompts;
+use crate::prompts::{self, glossary::GlossaryTerm};
 use crate::AppState;
 use tauri::ipc::Channel;
 use tauri::State;
@@ -151,15 +151,19 @@ pub async fn polish(
     // Detect language
     let detected_lang = detect_language(&text);
 
-    // Build prompts using the prompts module
-    let system_prompt = if detected_lang == "ko" {
-        prompts::polish::build_system_prompt()
-    } else {
-        prompts::polish::build_system_prompt_english()
-    };
+    // Keep glossary terms spelled consistently
+    let glossary_matches = db.find_glossary_matches(&text).await.unwrap_or_default();
+    let glossary_terms: Vec<GlossaryTerm<'_>> = glossary_matches
+        .iter()
+        .map(|g| GlossaryTerm {
+            keyword: &g.keyword,
+            description: &g.description,
+        })
+        .collect();
 
-    let user_prompt =
-        prompts::polish::build_user_prompt(&text, &context, &channel, &options, &detected_lang);
+    // Build prompts using the prompts module
+    let system_prompt = prompts::polish::build_system_prompt(&detected_lang, &glossary_terms);
+    let user_prompt = prompts::polish::build_user_prompt(&text, &context, &channel, &options);
 
     let model_profile_id = effective_model_profile_id(&settings, model.as_ref());
     let resolved = match resolve_ai_request(
@@ -252,15 +256,19 @@ pub async fn polish_stream(
         },
     );
 
-    // Build prompts using the prompts module
-    let system_prompt = if detected_lang == "ko" {
-        prompts::polish::build_system_prompt()
-    } else {
-        prompts::polish::build_system_prompt_english()
-    };
+    // Keep glossary terms spelled consistently
+    let glossary_matches = db.find_glossary_matches(&text).await.unwrap_or_default();
+    let glossary_terms: Vec<GlossaryTerm<'_>> = glossary_matches
+        .iter()
+        .map(|g| GlossaryTerm {
+            keyword: &g.keyword,
+            description: &g.description,
+        })
+        .collect();
 
-    let user_prompt =
-        prompts::polish::build_user_prompt(&text, &context, &channel, &options, &detected_lang);
+    // Build prompts using the prompts module
+    let system_prompt = prompts::polish::build_system_prompt(&detected_lang, &glossary_terms);
+    let user_prompt = prompts::polish::build_user_prompt(&text, &context, &channel, &options);
 
     let model_profile_id = effective_model_profile_id(&settings, model.as_ref());
     let resolved = match resolve_ai_request(

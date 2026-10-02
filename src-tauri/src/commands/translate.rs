@@ -4,6 +4,7 @@ use crate::ai::{
 };
 use crate::database::{TranslationRow, UserSettingsRow};
 use crate::keychain;
+use crate::prompts::{self, glossary::GlossaryTerm};
 use crate::AppState;
 use tauri::ipc::Channel;
 use tauri::State;
@@ -202,30 +203,29 @@ pub async fn translate(
     // Find matching glossary entries (language-agnostic)
     let glossary_matches = db.find_glossary_matches(&text).await.unwrap_or_default();
 
-    // Build glossary context for prompt
-    let glossary_context = if glossary_matches.is_empty() {
-        String::new()
-    } else {
-        let terms: Vec<String> = glossary_matches
-            .iter()
-            .map(|g| format!("- {}: {}", g.keyword, g.description))
-            .collect();
-        format!(
-            "\n\nIMPORTANT: When you encounter the following terms, use the provided descriptions as context for translation:\n{}",
-            terms.join("\n")
-        )
-    };
+    // Build glossary terms for the system prompt
+    let glossary_terms: Vec<GlossaryTerm<'_>> = glossary_matches
+        .iter()
+        .map(|g| GlossaryTerm {
+            keyword: &g.keyword,
+            description: &g.description,
+        })
+        .collect();
 
     let model_profile_id = effective_model_profile_id(&settings, model.as_ref());
-    let prompt = format!(
-        "Translate the following text from {} to {}. Return only the translated text without any explanation.{}\n\nText to translate:\n{}",
-        if src_lang == "ko" { "Korean" } else { "English" },
-        if tgt_lang == "ko" { "Korean" } else { "English" },
-        glossary_context,
-        text
-    );
+    let system_prompt =
+        prompts::translate::build_system_prompt(&src_lang, &tgt_lang, &glossary_terms);
+    let prompt = prompts::translate::build_user_prompt(&text);
 
-    let resolved = match resolve_ai_request(db, &settings, model_profile_id, None, prompt).await {
+    let resolved = match resolve_ai_request(
+        db,
+        &settings,
+        model_profile_id,
+        Some(system_prompt),
+        prompt,
+    )
+    .await
+    {
         Ok(resolved) => resolved,
         Err(error) => {
             return Ok(TranslateResponse {
@@ -417,19 +417,14 @@ pub async fn translate_stream(
     // Find matching glossary entries (language-agnostic)
     let glossary_matches = db.find_glossary_matches(&text).await.unwrap_or_default();
 
-    // Build glossary context for prompt
-    let glossary_context = if glossary_matches.is_empty() {
-        String::new()
-    } else {
-        let terms: Vec<String> = glossary_matches
-            .iter()
-            .map(|g| format!("- {}: {}", g.keyword, g.description))
-            .collect();
-        format!(
-            "\n\nIMPORTANT: When you encounter the following terms, use the provided descriptions as context for translation:\n{}",
-            terms.join("\n")
-        )
-    };
+    // Build glossary terms for the system prompt
+    let glossary_terms: Vec<GlossaryTerm<'_>> = glossary_matches
+        .iter()
+        .map(|g| GlossaryTerm {
+            keyword: &g.keyword,
+            description: &g.description,
+        })
+        .collect();
 
     let glossary_ids: Vec<String> = glossary_matches.iter().map(|g| g.id.clone()).collect();
 
@@ -444,15 +439,19 @@ pub async fn translate_stream(
     );
 
     let model_profile_id = effective_model_profile_id(&settings, model.as_ref());
-    let prompt = format!(
-        "Translate the following text from {} to {}. Return only the translated text without any explanation.{}\n\nText to translate:\n{}",
-        if src_lang == "ko" { "Korean" } else { "English" },
-        if tgt_lang == "ko" { "Korean" } else { "English" },
-        glossary_context,
-        text
-    );
+    let system_prompt =
+        prompts::translate::build_system_prompt(&src_lang, &tgt_lang, &glossary_terms);
+    let prompt = prompts::translate::build_user_prompt(&text);
 
-    let resolved = match resolve_ai_request(db, &settings, model_profile_id, None, prompt).await {
+    let resolved = match resolve_ai_request(
+        db,
+        &settings,
+        model_profile_id,
+        Some(system_prompt),
+        prompt,
+    )
+    .await
+    {
         Ok(resolved) => resolved,
         Err(error) => {
             emit_translate_stream_event(
