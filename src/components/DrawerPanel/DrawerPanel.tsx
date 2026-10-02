@@ -37,6 +37,19 @@ type DrawerMode = "collapsed" | "expanded" | "full";
 /** Gap between notes in the history strip (px). */
 const CARD_GAP = 12;
 
+/** True when keystrokes are going into a form control (search box, select, …). */
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return (
+    target.isContentEditable ||
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA" ||
+    target.tagName === "SELECT"
+  );
+}
+
 function ShortcutHint({ keys, label, title }: { keys: string; label: string; title: string }) {
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap" title={title}>
@@ -294,6 +307,13 @@ export function DrawerPanel({
 
       // History view keyboard shortcuts
       if (currentView === "history") {
+        // While typing (e.g. in the search box) plain keys belong to the text field:
+        // digits, Shift+digits ("!", "@", …) and the arrow keys must not fire shortcuts.
+        // Ctrl/Cmd/Alt combinations stay available.
+        if (isTypingTarget(e.target) && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          return;
+        }
+
         // Arrow keys for scrolling (left/right) - no modifiers
         if (!e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
           if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
