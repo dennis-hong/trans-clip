@@ -16,17 +16,18 @@ const LEGACY_MAX_OUTPUT_TOKENS: i32 = 4096;
 const SCHEMA_VERSION_MAX_OUTPUT_TOKENS: i64 = 1;
 
 /// Retired legacy `preferred_model` values and their latest replacements.
-const RETIRED_ANTHROPIC_MODELS: [(&str, &str); 5] = [
+const RETIRED_ANTHROPIC_MODELS: [(&str, &str); 6] = [
     ("claude-opus-4-6", "claude-opus-5-5"),
     ("claude-opus-4-7", "claude-opus-5-5"),
     ("claude-opus-4-8", "claude-opus-5-5"),
     ("claude-sonnet-4-6", DEFAULT_PREFERRED_MODEL),
     ("claude-sonnet-5", DEFAULT_PREFERRED_MODEL),
+    ("claude-haiku-4-5-20251001", "claude-haiku-5-5"),
 ];
 
 /// Retired seeded model profiles as `((provider, model_id), (provider, model_id))`.
 type ModelRef = (&'static str, &'static str);
-const RETIRED_MODELS: [(ModelRef, ModelRef); 10] = [
+const RETIRED_MODELS: [(ModelRef, ModelRef); 11] = [
     (
         ("anthropic", "claude-opus-4-6"),
         ("anthropic", "claude-opus-5-5"),
@@ -46,6 +47,10 @@ const RETIRED_MODELS: [(ModelRef, ModelRef); 10] = [
     (
         ("anthropic", "claude-sonnet-5"),
         ("anthropic", "claude-sonnet-5-5"),
+    ),
+    (
+        ("anthropic", "claude-haiku-4-5-20251001"),
+        ("anthropic", "claude-haiku-5-5"),
     ),
     (("openai", "gpt-5.5"), ("openai", "gpt-6.1-sol")),
     (("openai", "gpt-5.4-mini"), ("openai", "gpt-6-luna")),
@@ -468,9 +473,9 @@ impl Database {
                 20,
             ),
             (
-                "anthropic:claude-haiku-4-5-20251001",
-                "Claude Haiku 4.5",
-                "claude-haiku-4-5-20251001",
+                "anthropic:claude-haiku-5-5",
+                "Claude Haiku 5.5",
+                "claude-haiku-5-5",
                 30,
             ),
         ] {
@@ -1597,7 +1602,7 @@ fn default_anthropic_model_display_name(model_id: &str) -> String {
     match model_id {
         "claude-opus-5-5" => "Claude Opus 5.5".to_string(),
         "claude-sonnet-5-5" => "Claude Sonnet 5.5".to_string(),
-        "claude-haiku-4-5-20251001" => "Claude Haiku 4.5".to_string(),
+        "claude-haiku-5-5" => "Claude Haiku 5.5".to_string(),
         _ => model_id.to_string(),
     }
 }
@@ -1850,7 +1855,7 @@ mod tests {
 
         assert_eq!(
             settings.preferred_model_profile_id.as_deref(),
-            Some("anthropic:claude-haiku-4-5-20251001")
+            Some("anthropic:claude-haiku-5-5")
         );
         assert_eq!(anthropic.endpoint_mode, "custom");
         assert_eq!(anthropic.base_url, "https://gateway.example/anthropic/v1");
@@ -2016,6 +2021,7 @@ mod tests {
         for retired in [
             "claude-opus-4-8",
             "claude-sonnet-5",
+            "claude-haiku-4-5-20251001",
             "gpt-5.5",
             "gpt-5.4-mini",
             "gemini-2.5-pro",
@@ -2029,7 +2035,7 @@ mod tests {
         for latest in [
             "claude-opus-5-5",
             "claude-sonnet-5-5",
-            "claude-haiku-4-5-20251001",
+            "claude-haiku-5-5",
             "gpt-6.1-sol",
             "gpt-6-luna",
             "gemini-3.1-pro-preview",

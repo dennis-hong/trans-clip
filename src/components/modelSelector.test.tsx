@@ -93,7 +93,7 @@ function makeSettings(preferredModelProfileId: string): UserSettings {
       {
         id: "anthropic:claude-haiku-4-5-20251001",
         providerConfigId: "anthropic",
-        displayName: "Claude Haiku 4.5",
+        displayName: "Claude Haiku 5.5",
         modelId: "claude-haiku-4-5-20251001",
         apiInterface: "anthropic_messages",
         supportsStreaming: true,
@@ -129,7 +129,7 @@ describe("popup model selectors", () => {
   it("shows the configured translation default as a real model option", () => {
     render(<TranslationPopup sourceText="hello" onClose={vi.fn()} />);
 
-    const modelSelect = screen.getByDisplayValue("Anthropic - Claude Haiku 4.5 (기본)");
+    const modelSelect = screen.getByDisplayValue("Anthropic - Claude Haiku 5.5 (기본)");
     expect(screen.queryByRole("option", { name: "기본값" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "다시 번역" }));
@@ -144,7 +144,7 @@ describe("popup model selectors", () => {
     render(<PolishPopup sourceText="hello" onClose={vi.fn()} />);
 
     const modelSelect = screen.getAllByRole("combobox")[2];
-    expect(modelSelect).toHaveDisplayValue("Anthropic - Claude Haiku 4.5 (기본)");
+    expect(modelSelect).toHaveDisplayValue("Anthropic - Claude Haiku 5.5 (기본)");
     expect(screen.queryByRole("option", { name: "기본값" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "다시 다듬기" }));

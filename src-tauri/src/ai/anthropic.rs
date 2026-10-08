@@ -37,6 +37,12 @@ pub fn latency_tuning(provider_kind: ProviderKind, model_id: &str) -> Option<Lat
             thinking: Some("between_tools"),
             effort: "medium",
         })
+    } else if model_id.starts_with("claude-haiku-5-5") {
+        // Haiku 5.5 is the first Haiku with effort control; keep it at the lowest level.
+        Some(LatencyTuning {
+            thinking: None,
+            effort: "low",
+        })
     } else if model_id.starts_with("claude-opus-5-5") {
         // Adaptive thinking is always on for Opus 5.5; effort is the only control.
         Some(LatencyTuning {

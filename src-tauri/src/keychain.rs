@@ -242,7 +242,7 @@ pub async fn validate_api_key(api_key: &str, anthropic_base_url: &str) -> Result
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
         .json(&serde_json::json!({
-            "model": "claude-haiku-4-5-20251001",
+            "model": "claude-haiku-5-5",
             "max_tokens": 1,
             "messages": [{"role": "user", "content": "test"}]
         }))
