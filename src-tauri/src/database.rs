@@ -6,7 +6,7 @@ use crate::ai::{
 use sqlx::{sqlite::SqlitePoolOptions, Pool, Sqlite};
 use std::path::Path;
 
-const DEFAULT_PREFERRED_MODEL: &str = "claude-sonnet-5-5";
+const DEFAULT_PREFERRED_MODEL: &str = "claude-haiku-5-5";
 
 /// Room for a full 10,000-character translation (thinking tokens count toward it too).
 const DEFAULT_MAX_OUTPUT_TOKENS: i32 = 16384;
@@ -20,8 +20,8 @@ const RETIRED_ANTHROPIC_MODELS: [(&str, &str); 6] = [
     ("claude-opus-4-6", "claude-opus-5-5"),
     ("claude-opus-4-7", "claude-opus-5-5"),
     ("claude-opus-4-8", "claude-opus-5-5"),
-    ("claude-sonnet-4-6", DEFAULT_PREFERRED_MODEL),
-    ("claude-sonnet-5", DEFAULT_PREFERRED_MODEL),
+    ("claude-sonnet-4-6", "claude-sonnet-5-5"),
+    ("claude-sonnet-5", "claude-sonnet-5-5"),
     ("claude-haiku-4-5-20251001", "claude-haiku-5-5"),
 ];
 
@@ -199,7 +199,7 @@ impl Database {
             CREATE TABLE IF NOT EXISTS user_settings (
                 id TEXT PRIMARY KEY DEFAULT 'default',
                 max_history_count INTEGER NOT NULL DEFAULT 50,
-                preferred_model TEXT NOT NULL DEFAULT 'claude-sonnet-5-5',
+                preferred_model TEXT NOT NULL DEFAULT 'claude-haiku-5-5',
                 auto_detect_language INTEGER NOT NULL DEFAULT 1,
                 double_press_interval INTEGER NOT NULL DEFAULT 500,
                 translation_cache_days INTEGER NOT NULL DEFAULT 7,
@@ -1718,7 +1718,7 @@ mod tests {
 
         assert_eq!(
             settings.preferred_model_profile_id.as_deref(),
-            Some("anthropic:claude-sonnet-5-5")
+            Some("anthropic:claude-haiku-5-5")
         );
         assert!(providers.iter().any(|provider| {
             provider.id == "anthropic"
@@ -1964,7 +1964,7 @@ mod tests {
         let db = Database::new(&path).await.expect("db should initialize");
         let settings = db.get_settings().await.expect("should fetch settings");
 
-        assert_eq!(settings.preferred_model, DEFAULT_PREFERRED_MODEL);
+        assert_eq!(settings.preferred_model, "claude-sonnet-5-5");
         assert_eq!(
             settings.preferred_model_profile_id.as_deref(),
             Some("anthropic:claude-sonnet-5-5")
